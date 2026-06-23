@@ -1,11 +1,11 @@
-# hyprdecaffeine
+# decaf
 
 A lightweight, robust suspend timer for Linux.
 
-`hyprdecaffeine` is the opposite of the classic "Caffeine" utility. Instead of
-keeping your computer awake, it allows you to easily schedule a system
-suspension (sleep) after a specific amount of time. It features a fully-fledged
-CLI backend and a clean, integrated Rofi GUI.
+`decaf` is the opposite of the classic "Caffeine" utility. Instead of keeping
+your computer awake, it allows you to easily schedule a system suspension
+(sleep) after a specific amount of time. It features a fully-fledged CLI backend
+and a clean, integrated Rofi GUI.
 
 ### Features
 
@@ -34,20 +34,20 @@ CLI backend and a clean, integrated Rofi GUI.
 
 ### Arch Linux (AUR)
 
-```
-paru -Syu hyprdecaffeine
+```bash
+paru -Syu decaf
 ```
 
 ## Usage
 
-`hyprdecaffeine` functions as both a CLI tool and a GUI launcher.
+`decaf` functions as both a CLI tool and a GUI launcher.
 
 ### Graphical Interface (Rofi)
 
 To open the interactive menu, run:
 
 ```bash
-hyprdecaffeine menu
+decaf menu
 
 ```
 
@@ -57,26 +57,15 @@ You can interact with the backend directly from your terminal or custom scripts:
 
 ```bash
 # Start a timer (defaults to minutes if no unit is provided)
-hyprdecaffeine start 15     # Suspends in 15 minutes
-hyprdecaffeine start 45m    # Suspends in 45 minutes
-hyprdecaffeine start 2h     # Suspends in 2 hours
+decaf start 15     # Suspends in 15 minutes
+decaf start 45m    # Suspends in 45 minutes
+decaf start 2h     # Suspends in 2 hours
 
 # Check the status of a running timer
-hyprdecaffeine status
+decaf status
 #> 14m
 
 # Cancel an active timer
-hyprdecaffeine stop
-
+decaf stop
 ```
 
-## Hyprland Integration
-
-To bind the Rofi menu to a keyboard shortcut in Hyprland, add the following to
-your `~/.config/hypr/hyprland.conf`:
-
-```conf
-# Open the suspend timer menu with Super + Shift + S
-bind = $mainMod SHIFT, S, exec, hyprdecaffeine menu
-
-```
