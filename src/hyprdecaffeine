@@ -26,12 +26,13 @@ Commands:
                  Formats: '15', '15m', '15s', '1h', '2h30m'.
   stop           Cancels any active suspend timer.
   status         Returns the current timer status and time remaining.
+  menu           Opens the interactive Rofi GUI.
   help           Shows this help message.
 
 Examples:
   hyprdecaffeine start 30
-  hyprdecaffeine start 1h
-  hyprdecaffeine stop
+  hyprdecaffeine status
+  hyprdecaffeine menu
 EOF
 }
 
@@ -134,6 +135,72 @@ get_status() {
     fi
 }
 
+show_menu() {
+    # Ensure Rofi is installed before trying to run the GUI
+    if ! command -v rofi &>/dev/null; then
+        echo "Error: rofi is not installed or not in PATH." >&2
+        exit 1
+    fi
+
+    local current_status
+    current_status=$(get_status)
+
+    # Base options with Nerd Font icons
+    local options="󱎫 15 min\n󱎫 30 min\n󱎫 1 hour\n󱎫 2 hours\n󰔟 Custom..."
+
+    # Inject the separator and Cancel option at the BOTTOM if a timer is running
+    if [[ "$current_status" != "Inactive" ]]; then
+        options="$options\n──────────────\n󰅖 Cancel Timer ($current_status)"
+    fi
+
+    # rofi exits 1 if the user presses Escape. '|| true' prevents the script from crashing due to 'set -e'
+    # Using a Nerd Font sleep icon (󰒲) for the input prompt
+    local choice
+    choice=$(echo -e "$options" | rofi -dmenu -i -p "󰒲 Suspend in:" || true)
+
+    # Handle the selection, ensuring icons are included in the match strings
+    case "$choice" in
+    "󱎫 15 min")
+        start_timer "15m"
+        ;;
+    "󱎫 30 min")
+        start_timer "30m"
+        ;;
+    "󱎫 1 hour")
+        start_timer "1h"
+        ;;
+    "󱎫 2 hours")
+        start_timer "2h"
+        ;;
+    "󰔟 Custom...")
+        local custom_min
+        custom_min=$(rofi -dmenu -p "󰔟 Enter minutes (e.g., 45):" || true)
+
+        if [[ "$custom_min" =~ ^[0-9]+$ ]]; then
+            start_timer "${custom_min}m"
+        elif [[ -n "$custom_min" ]]; then
+            rofi -e "Invalid input: '$custom_min'. Please enter numbers only."
+        fi
+        ;;
+    "󰅖 Cancel"*)
+        stop_timer
+        # Optionally add a system notification here, e.g.: notify-send "Hyprdecaffeine" "Timer Cancelled"
+        ;;
+    "──────────────")
+        # The "dumb" separator was selected. Do nothing and exit cleanly.
+        exit 0
+        ;;
+    "")
+        # User pressed Escape or closed the window
+        exit 0
+        ;;
+    *)
+        rofi -e "Unknown selection."
+        exit 1
+        ;;
+    esac
+}
+
 # --- Main Logic Routing ---
 
 # Ensure at least one argument is provided
@@ -155,6 +222,9 @@ stop)
     ;;
 status)
     get_status
+    ;;
+menu)
+    show_menu
     ;;
 help | --help | -h)
     show_help
