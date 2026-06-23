@@ -180,14 +180,16 @@ show_menu() {
         start_timer "2h"
         ;;
     "󰔛 Custom...")
-        local custom_min
-        custom_min=$(rofi -dmenu -p "󰔟 Enter minutes (e.g., 45):" || true)
-
-        if [[ "$custom_min" =~ ^[0-9]+$ ]]; then
-            start_timer "${custom_min}m"
-        elif [[ -n "$custom_min" ]]; then
+        local custom_time
+        # Updated the prompt text to reflect the new flexibility
+        custom_time=$(rofi -dmenu -p "󰔟 Enter time (e.g., 45, 1h, 15s):" || true)
+        # Regex now accepts a string that starts with numbers and can contain letters or spaces
+        if [[ "$custom_time" =~ ^[0-9]+[a-zA-Z0-9\ ]*$ ]]; then
+            # Pass the raw input directly to the backend
+            start_timer "$custom_time"
+        elif [[ -n "$custom_time" ]]; then
             # Sending the error as a notification instead of a blocking Rofi window
-            notify-send -u critical -a "hyprdecaffeine" "Error" "Invalid input: '$custom_min'. Please enter numbers only."
+            notify-send -u critical -a "hyprdecaffeine" "Error" "Invalid input: '$custom_time'. Please start with a number."
         fi
         ;;
     "󰤆 Turn Off"*)
