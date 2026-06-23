@@ -37,10 +37,17 @@ EOF
 }
 
 stop_timer() {
+    local quiet="${1:-false}"
+
     # Suppress errors if the units don't exist (e.g., stopping when already stopped)
     systemctl --user stop "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
     # Clear the failed state just in case a previous run crashed or was manually killed
     systemctl --user reset-failed "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
+
+    if [[ "$quiet" != "true" ]]; then
+        # Send the "Off" notification
+        notify-send -a "hyprdecaffeine" "󰅖 Decaffeine Off" "Suspend timer disabled"
+    fi
 }
 
 start_timer() {
@@ -57,8 +64,8 @@ start_timer() {
         duration="${duration}m"
     fi
 
-    # Ensure a clean slate before starting a new timer (handles the "reset" behavior)
-    stop_timer
+    # Pass "true" so it silently resets without sending a notification
+    stop_timer "true"
 
     # Create the transient timer using systemd-run
     # --on-active creates a monotonic timer, guaranteeing exact durations regardless of system clock syncing
@@ -69,6 +76,9 @@ start_timer() {
         $SUSPEND_CMD >/dev/null 2>&1
 
     echo "Timer started: System will suspend in $duration."
+
+    # Send the "Active" notification
+    notify-send -a "hyprdecaffeine" "󰒲 Decaffeine Active" "Suspend scheduled: $duration"
 }
 
 get_status() {
@@ -179,7 +189,8 @@ show_menu() {
         if [[ "$custom_min" =~ ^[0-9]+$ ]]; then
             start_timer "${custom_min}m"
         elif [[ -n "$custom_min" ]]; then
-            rofi -e "Invalid input: '$custom_min'. Please enter numbers only."
+            # Sending the error as a notification instead of a blocking Rofi window
+            notify-send -u critical -a "hyprdecaffeine" "Error" "Invalid input: '$custom_min'. Please enter numbers only."
         fi
         ;;
     "󰅖 Cancel"*)
@@ -195,7 +206,7 @@ show_menu() {
         exit 0
         ;;
     *)
-        rofi -e "Unknown selection."
+        notify-send -u critical -a "hyprdecaffeine" "Error" "Unknown selection."
         exit 1
         ;;
     esac
@@ -210,7 +221,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 COMMAND="$1"
-shift # Remove the command from arguments, leaving only options
+shift
 
 case "$COMMAND" in
 start)
