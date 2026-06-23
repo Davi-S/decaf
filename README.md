@@ -1,14 +1,13 @@
-# hyprdecaffeine ☕💤
+# hyprdecaffeine
 
-A lightweight, robust suspend timer for Linux, designed perfectly for Wayland
-and Hyprland.
+A lightweight, robust suspend timer for Linux.
 
 `hyprdecaffeine` is the opposite of the classic "Caffeine" utility. Instead of
 keeping your computer awake, it allows you to easily schedule a system
 suspension (sleep) after a specific amount of time. It features a fully-fledged
 CLI backend and a clean, integrated Rofi GUI.
 
-### 🌟 Features
+### Features
 
 - **OS-Native Timers:** Uses `systemd-run` transient monotonic timers. This
   guarantees exact durations, ignores system clock syncing discrepancies, and
@@ -39,8 +38,9 @@ CLI backend and a clean, integrated Rofi GUI.
 
 ### Arch Linux (AUR)
 
-_(You can add the AUR yay/paru installation command here once you publish the
-PKGBUILD!)_
+```
+paru -Syu hyprdecaffeine
+```
 
 ---
 

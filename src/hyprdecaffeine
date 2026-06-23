@@ -59,7 +59,7 @@ start_timer() {
         exit 1
     fi
 
-    # UX Improvement: Default to minutes if the user inputs only digits
+    # Default to minutes if the user inputs only digits
     if [[ "$duration" =~ ^[0-9]+$ ]]; then
         duration="${duration}m"
     fi
@@ -82,7 +82,7 @@ start_timer() {
 }
 
 get_status() {
-    # 1. Verify the timer is actually running at a system level
+    # Verify the timer is actually running at a system level
     local state
     state=$(systemctl --user is-active "$TIMER_UNIT" 2>/dev/null || true)
 
@@ -91,7 +91,7 @@ get_status() {
         return
     fi
 
-    # 2. Grab the raw list-timers output.
+    # Grab the raw list-timers output.
     local timer_output
     timer_output=$(systemctl --user list-timers "$TIMER_UNIT" --no-legend 2>/dev/null || true)
 
@@ -100,7 +100,7 @@ get_status() {
         return
     fi
 
-    # 3. Extract the absolute wall-clock timestamp systemd calculated for us.
+    # Extract the absolute wall-clock timestamp systemd calculated for us.
     # systemctl list-timers format: DAY YYYY-MM-DD HH:MM:SS TZ ...
     # We use awk to grab columns 2, 3, and 4 (Date, Time, Timezone).
     local target_time
@@ -111,7 +111,7 @@ get_status() {
         return
     fi
 
-    # 4. Convert that timestamp to standard UNIX epoch seconds
+    # Convert that timestamp to standard UNIX epoch seconds
     local next_sec
     next_sec=$(date -d "$target_time" +%s 2>/dev/null || true)
 
@@ -181,9 +181,7 @@ show_menu() {
         ;;
     "󰔛 Custom...")
         local custom_time
-        # Updated the prompt text to reflect the new flexibility
         custom_time=$(rofi -dmenu -p "󰔟 Enter time (e.g., 45, 1h, 15s):" || true)
-        # Regex now accepts a string that starts with numbers and can contain letters or spaces
         if [[ "$custom_time" =~ ^[0-9]+[a-zA-Z0-9\ ]*$ ]]; then
             # Pass the raw input directly to the backend
             start_timer "$custom_time"
@@ -194,7 +192,6 @@ show_menu() {
         ;;
     "󰤆 Turn Off"*)
         stop_timer
-        # Optionally add a system notification here, e.g.: notify-send "Hyprdecaffeine" "Timer Cancelled"
         ;;
     "──────────────")
         # The "dumb" separator was selected. Do nothing and exit cleanly.
