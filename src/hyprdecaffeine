@@ -121,12 +121,10 @@ get_status() {
         return
     fi
 
-    # 5. Get current epoch seconds and do pure integer math
     local now_sec
     now_sec=$(date +%s)
     local diff_sec=$((next_sec - now_sec))
 
-    # 6. Format the output based on remaining seconds
     if ((diff_sec <= 0)); then
         echo "Suspending..."
         return
@@ -134,14 +132,13 @@ get_status() {
 
     local hours=$((diff_sec / 3600))
     local mins=$(((diff_sec % 3600) / 60))
-    local secs=$((diff_sec % 60))
 
     if ((hours > 0)); then
-        echo "${hours}h ${mins}m ${secs}s"
+        echo "${hours}h ${mins}m"
     elif ((mins > 0)); then
-        echo "${mins}m ${secs}s"
+        echo "${mins}m"
     else
-        echo "${secs}s"
+        echo "<1m"
     fi
 }
 
