@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-UNIT_NAME="hyprdecaffeine"
+UNIT_NAME="decaf"
 TIMER_UNIT="${UNIT_NAME}.timer"
 SERVICE_UNIT="${UNIT_NAME}.service"
 
@@ -19,7 +19,7 @@ SUSPEND_CMD="systemctl suspend -i"
 
 show_help() {
     cat <<EOF
-Usage: hyprdecaffeine <command> [argument]
+Usage: decaf <command> [argument]
 
 Commands:
   start <time>   Starts a suspend timer. Defaults to minutes if no unit is given.
@@ -30,9 +30,9 @@ Commands:
   help           Shows this help message.
 
 Examples:
-  hyprdecaffeine start 30
-  hyprdecaffeine status
-  hyprdecaffeine menu
+  decaf start 30
+  decaf status
+  decaf menu
 EOF
 }
 
@@ -46,7 +46,7 @@ stop_timer() {
 
     if [[ "$quiet" != "true" ]]; then
         # Send the "Off" notification
-        notify-send -a "hyprdecaffeine" "󰒲 Decaffeine Off" "Suspend timer disabled"
+        notify-send -a "decaf" "Decaf Off" "Suspend timer disabled"
     fi
 }
 
@@ -78,7 +78,7 @@ start_timer() {
     echo "Timer started: System will suspend in $duration."
 
     # Send the "Active" notification
-    notify-send -a "hyprdecaffeine" "󰒲 Decaffeine Active" "Suspend scheduled: $duration"
+    notify-send -a "decaf" "Decaf Active" "Suspend scheduled: $duration"
 }
 
 get_status() {
@@ -153,44 +153,43 @@ show_menu() {
     current_status=$(get_status)
 
     # Base options with Nerd Font icons
-    local options="󰔛 15 min\n󰔛 30 min\n󰔛 1 hour\n󰔛 2 hours\n󰔛 Custom..."
+    local options="15 min\n30 min\n1 hour\n2 hours\nCustom..."
 
     # Inject the separator and Cancel option at the BOTTOM if a timer is running
     if [[ "$current_status" != "Inactive" ]]; then
-        options="$options\n────────────────────────\n󰤆 Turn Off ($current_status)"
+        options="$options\n────────────────────────\nTurn Off ($current_status)"
     fi
 
     # rofi exits 1 if the user presses Escape. '|| true' prevents the script from crashing due to 'set -e'
-    # Using a Nerd Font sleep icon (󰒲) for the input prompt
     local choice
-    choice=$(echo -e "$options" | rofi -dmenu -i -p "󰒲 Decaffeine:" || true)
+    choice=$(echo -e "$options" | rofi -dmenu -i -p "Decaf:" || true)
 
     # Handle the selection, ensuring icons are included in the match strings
     case "$choice" in
-    "󰔛 15 min")
+    "15 min")
         start_timer "15m"
         ;;
-    "󰔛 30 min")
+    "30 min")
         start_timer "30m"
         ;;
-    "󰔛 1 hour")
+    "1 hour")
         start_timer "1h"
         ;;
-    "󰔛 2 hours")
+    "2 hours")
         start_timer "2h"
         ;;
-    "󰔛 Custom...")
+    "Custom...")
         local custom_time
-        custom_time=$(rofi -dmenu -p "󰔟 Enter time (e.g., 45, 1h, 15s):" || true)
+        custom_time=$(rofi -dmenu -p "Enter time (e.g., 45, 1h, 15s):" || true)
         if [[ "$custom_time" =~ ^[0-9]+[a-zA-Z0-9\ ]*$ ]]; then
             # Pass the raw input directly to the backend
             start_timer "$custom_time"
         elif [[ -n "$custom_time" ]]; then
             # Sending the error as a notification instead of a blocking Rofi window
-            notify-send -u critical -a "hyprdecaffeine" "Error" "Invalid input: '$custom_time'. Please start with a number."
+            notify-send -u critical -a "decaf" "Error" "Invalid input: '$custom_time'. Please start with a number."
         fi
         ;;
-    "󰤆 Turn Off"*)
+    "Turn Off"*)
         stop_timer
         ;;
     "──────────────")
@@ -202,7 +201,7 @@ show_menu() {
         exit 0
         ;;
     *)
-        notify-send -u critical -a "hyprdecaffeine" "Error" "Unknown selection."
+        notify-send -u critical -a "decaf" "Error" "Unknown selection."
         exit 1
         ;;
     esac
