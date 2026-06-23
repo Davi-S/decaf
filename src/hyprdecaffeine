@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+
+# Enforce strict error handling
+# -e: Exit immediately if a command exits with a non-zero status.
+# -u: Treat unset variables as an error.
+# -o pipefail: Return value of a pipeline is the status of the last command to exit with a non-zero status.
+set -euo pipefail
+
+# --- Configuration ---
+UNIT_NAME="hyprdecaffeine"
+TIMER_UNIT="${UNIT_NAME}.timer"
+SERVICE_UNIT="${UNIT_NAME}.service"
+
+# Using -i to bypass inhibitor locks (like active videos or Steam downloads)
+# ensuring the computer always suspends when instructed.
+SUSPEND_CMD="systemctl suspend -i"
+
+# --- Functions ---
+
+show_help() {
+    cat <<EOF
+Usage: hyprdecaffeine <command> [argument]
+
+Commands:
+  start <time>   Starts a suspend timer. Defaults to minutes if no unit is given.
+                 Formats: '15', '15m', '15s', '1h', '2h30m'.
+  stop           Cancels any active suspend timer.
+  status         Returns the current timer status and time remaining.
+  help           Shows this help message.
+
+Examples:
+  hyprdecaffeine start 30
+  hyprdecaffeine start 1h
+  hyprdecaffeine stop
+EOF
+}
+
+stop_timer() {
+    # Suppress errors if the units don't exist (e.g., stopping when already stopped)
+    systemctl --user stop "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
+    # Clear the failed state just in case a previous run crashed or was manually killed
+    systemctl --user reset-failed "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
+}
+
+start_timer() {
+    local duration="$1"
+
+    if [[ -z "$duration" ]]; then
+        echo "Error: Duration not provided." >&2
+        show_help
+        exit 1
+    fi
+
+    # UX Improvement: Default to minutes if the user inputs only digits
+    if [[ "$duration" =~ ^[0-9]+$ ]]; then
+        duration="${duration}m"
+    fi
+
+    # Ensure a clean slate before starting a new timer (handles the "reset" behavior)
+    stop_timer
+
+    # Create the transient timer using systemd-run
+    # --on-active creates a monotonic timer, guaranteeing exact durations regardless of system clock syncing
+    systemd-run --user \
+        --unit="$UNIT_NAME" \
+        --on-active="$duration" \
+        --timer-property="AccuracySec=1s" \
+        $SUSPEND_CMD >/dev/null 2>&1
+
+    echo "Timer started: System will suspend in $duration."
+}
+
+get_status() {
+    # 1. Verify the timer is actually running at a system level
+    local state
+    state=$(systemctl --user is-active "$TIMER_UNIT" 2>/dev/null || true)
+
+    if [[ "$state" != "active" ]]; then
+        echo "Inactive"
+        return
+    fi
+
+    # 2. Grab the raw list-timers output.
+    local timer_output
+    timer_output=$(systemctl --user list-timers "$TIMER_UNIT" --no-legend 2>/dev/null || true)
+
+    if [[ -z "$timer_output" ]]; then
+        echo "Active"
+        return
+    fi
+
+    # 3. Extract the absolute wall-clock timestamp systemd calculated for us.
+    # systemctl list-timers format: DAY YYYY-MM-DD HH:MM:SS TZ ...
+    # We use awk to grab columns 2, 3, and 4 (Date, Time, Timezone).
+    local target_time
+    target_time=$(echo "$timer_output" | awk '{print $2, $3, $4}')
+
+    if [[ -z "$target_time" ]]; then
+        echo "Active"
+        return
+    fi
+
+    # 4. Convert that timestamp to standard UNIX epoch seconds
+    local next_sec
+    next_sec=$(date -d "$target_time" +%s 2>/dev/null || true)
+
+    # Fallback if the date conversion fails for any reason
+    if [[ -z "$next_sec" ]]; then
+        echo "Active"
+        return
+    fi
+
+    # 5. Get current epoch seconds and do pure integer math
+    local now_sec
+    now_sec=$(date +%s)
+    local diff_sec=$((next_sec - now_sec))
+
+    # 6. Format the output based on remaining seconds
+    if ((diff_sec <= 0)); then
+        echo "Suspending..."
+        return
+    fi
+
+    local hours=$((diff_sec / 3600))
+    local mins=$(((diff_sec % 3600) / 60))
+    local secs=$((diff_sec % 60))
+
+    if ((hours > 0)); then
+        echo "${hours}h ${mins}m ${secs}s"
+    elif ((mins > 0)); then
+        echo "${mins}m ${secs}s"
+    else
+        echo "${secs}s"
+    fi
+}
+
+# --- Main Logic Routing ---
+
+# Ensure at least one argument is provided
+if [[ $# -eq 0 ]]; then
+    show_help
+    exit 1
+fi
+
+COMMAND="$1"
+shift # Remove the command from arguments, leaving only options
+
+case "$COMMAND" in
+start)
+    start_timer "${1:-}"
+    ;;
+stop)
+    stop_timer
+    echo "Timer stopped."
+    ;;
+status)
+    get_status
+    ;;
+help | --help | -h)
+    show_help
+    ;;
+*)
+    echo "Error: Unknown command '$COMMAND'" >&2
+    show_help
+    exit 1
+    ;;
+esac
