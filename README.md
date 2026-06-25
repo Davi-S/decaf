@@ -1,4 +1,4 @@
-# decaf
+# Decaf
 
 A lightweight, robust suspend timer for Linux.
 
@@ -19,16 +19,12 @@ and a clean, integrated Rofi GUI.
   the CLI logic and the Rofi graphical interface.
 - **Smart Notifications:** Native system notifications via `notify-send` for
   timer activation, cancellation, and errors.
-- **Dynamic GUI:** The Rofi menu actively checks for running timers and
-  dynamically injects a "Turn Off" option displaying the remaining time.
 
 ## Requirements
 
 - **`systemd`**: For timer management and system suspension.
 - **`rofi`**: For the graphical menu.
 - **`libnotify`**: For `notify-send` desktop notifications.
-- **Nerd Fonts**: (Optional but recommended) For the icons used in the Rofi menu
-  and notifications.
 
 ## Installation
 
