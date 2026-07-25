@@ -50,6 +50,39 @@ stop_timer() {
     fi
 }
 
+parse_duration() {
+    local dur="$1"
+    if [[ "$dur" =~ ^[0-9]+$ ]]; then
+        dur="${dur}m"
+    fi
+
+    local us
+    us=$( (systemd-analyze timespan "$dur" 2>/dev/null || true) | awk '/μs:/ {print $2}' )
+    if [[ -n "$us" && "$us" =~ ^[0-9]+$ ]]; then
+        echo $((us / 1000000))
+        return 0
+    fi
+
+    local total=0
+    local val=""
+    for (( i=0; i<${#dur}; i++ )); do
+        local char="${dur:$i:1}"
+        if [[ "$char" =~ [0-9] ]]; then
+            val="${val}${char}"
+        else
+            case "$char" in
+                h|H) total=$((total + ${val:-0} * 3600)); val="" ;;
+                m|M) total=$((total + ${val:-0} * 60)); val="" ;;
+                s|S) total=$((total + ${val:-0})); val="" ;;
+            esac
+        fi
+    done
+    if [[ -n "$val" ]]; then
+        total=$((total + val * 60))
+    fi
+    echo "$total"
+}
+
 start_timer() {
     local duration="$1"
 
@@ -64,14 +97,30 @@ start_timer() {
         duration="${duration}m"
     fi
 
+    local seconds
+    seconds=$(parse_duration "$duration")
+
+    if [[ -z "$seconds" || "$seconds" -le 0 ]]; then
+        echo "Error: Invalid duration format '$duration'." >&2
+        exit 1
+    fi
+
     # Pass "true" so it silently resets without sending a notification
     stop_timer "true"
 
+    local target_time
+    target_time=$(date -d "+${seconds} seconds" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
+
+    if [[ -z "$target_time" ]]; then
+        echo "Error: Failed to calculate target time." >&2
+        exit 1
+    fi
+
     # Create the transient timer using systemd-run
-    # --on-active creates a monotonic timer, guaranteeing exact durations regardless of system clock syncing
+    # --on-calendar uses absolute wall-clock time, ensuring suspend/sleep time is accounted for
     systemd-run --user \
         --unit="$UNIT_NAME" \
-        --on-active="$duration" \
+        --on-calendar="$target_time" \
         --timer-property="AccuracySec=1s" \
         $SUSPEND_CMD >/dev/null 2>&1
 

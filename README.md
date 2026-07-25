@@ -9,8 +9,8 @@ and a clean, integrated Rofi GUI.
 
 ### Features
 
-- **OS-Native Timers:** Uses `systemd-run` transient monotonic timers. This
-  guarantees exact durations, ignores system clock syncing discrepancies, and
+- **OS-Native Timers:** Uses `systemd-run` transient wall-clock timers (`--on-calendar`).
+  This accounts for system suspend/sleep periods, ensures absolute expiration, and
   leaves zero background zombie processes.
 - **Unconditional Suspend:** Bypasses active inhibitor locks (like playing
   videos or Steam downloads) to ensure the system _actually_ sleeps when you
