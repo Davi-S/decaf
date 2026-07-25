@@ -83,6 +83,25 @@ parse_duration() {
     echo "$total"
 }
 
+trigger_suspend() {
+    local target_epoch="${1:-}"
+
+    if [[ -n "$target_epoch" && "$target_epoch" =~ ^[0-9]+$ ]]; then
+        local now_epoch
+        now_epoch=$(date +%s)
+        local diff=$((now_epoch - target_epoch))
+
+        # If the timer fired more than 30 seconds after its scheduled target time,
+        # it indicates the system was suspended/asleep when the target time passed.
+        if (( diff > 30 )); then
+            notify-send -a "decaf" "Decaf" "Timer expired while system was suspended. Suspend skipped."
+            exit 0
+        fi
+    fi
+
+    eval "$SUSPEND_CMD"
+}
+
 start_timer() {
     local duration="$1"
 
@@ -108,21 +127,29 @@ start_timer() {
     # Pass "true" so it silently resets without sending a notification
     stop_timer "true"
 
+    local now_epoch
+    now_epoch=$(date +%s)
+    local target_epoch=$((now_epoch + seconds))
+
     local target_time
-    target_time=$(date -d "+${seconds} seconds" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
+    target_time=$(date -d "@${target_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
 
     if [[ -z "$target_time" ]]; then
         echo "Error: Failed to calculate target time." >&2
         exit 1
     fi
 
+    local decaf_bin
+    decaf_bin=$(readlink -f "$0" 2>/dev/null || command -v decaf || echo "decaf")
+
     # Create the transient timer using systemd-run
-    # --on-calendar uses absolute wall-clock time, ensuring suspend/sleep time is accounted for
+    # --on-calendar uses absolute wall-clock time
+    # Running decaf trigger passes target_epoch so decaf can verify it fired on time
     systemd-run --user \
         --unit="$UNIT_NAME" \
         --on-calendar="$target_time" \
         --timer-property="AccuracySec=1s" \
-        $SUSPEND_CMD >/dev/null 2>&1
+        "$decaf_bin" trigger "$target_epoch" >/dev/null 2>&1
 
     echo "Timer started: System will suspend in $duration."
 
@@ -277,6 +304,9 @@ stop)
     ;;
 status)
     get_status
+    ;;
+trigger)
+    trigger_suspend "${1:-}"
     ;;
 menu)
     show_menu
