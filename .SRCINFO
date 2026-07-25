@@ -1,0 +1,15 @@
+pkgbase = decaf
+	pkgdesc = A Rofi-based sleep timer utility
+	pkgver = 1.0.5
+	pkgrel = 1
+	url = https://github.com/davi-s/decaf
+	arch = any
+	license = MIT
+	depends = bash
+	depends = systemd
+	depends = rofi
+	depends = libnotify
+	source = decaf-1.0.5.tar.gz::https://github.com/davi-s/decaf/archive/refs/tags/v1.0.5.tar.gz
+	sha256sums = 26238ebae2ca99ac2129e1c9865dca787bed3f88c2e0bfc9f85caf6c2c36f1ee
+
+pkgname = decaf
