@@ -81,6 +81,9 @@ See `man decaf` for the full reference.
 
 - `make check` runs `shellcheck` and `shfmt`, and `make test` runs the test suite
   (needs `bats`: `pacman -S bash-bats`). CI runs both on every push.
+- `make integration` tests against your real systemd session without
+  suspending; run it before a release. `SUSPEND=1` adds checks that suspend
+  the machine, each started only after you press Enter.
 - Record changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
 - Releases and AUR publishing are described in [`RELEASING.md`](RELEASING.md).
 

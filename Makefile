@@ -7,11 +7,11 @@ DOCDIR      = $(DESTDIR)$(PREFIX)/share/doc/decaf
 BASHCOMPDIR = $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 
 SHELL_SOURCES = src/decaf completions/decaf.bash scripts/*.sh \
-                tests/helpers.bash tests/fakes/fake tests/*.bats
+                tests/helpers.bash tests/fakes/fake tests/*.bats tests/integration.sh
 
 BATS ?= bats
 
-.PHONY: all install uninstall check test
+.PHONY: all install uninstall check test integration
 
 all:
 	@echo "Nothing to build. Run 'make install' (PREFIX=$(PREFIX))."
@@ -36,3 +36,9 @@ check:
 # Run the test suite (needs bats: pacman -S bash-bats).
 test:
 	$(BATS) tests
+
+# Test against the real systemd; run locally before each release.
+# The automatic checks never suspend. SUSPEND=1 adds three checks that do,
+# each started only after you press Enter.
+integration:
+	tests/integration.sh $(if $(SUSPEND),--suspend)

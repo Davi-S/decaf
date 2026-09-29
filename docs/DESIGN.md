@@ -148,6 +148,14 @@ discipline in place of types, bats with recording fakes (`systemd-run`,
 `systemctl`, `date`, `gdbus`, `notify-send`, `sleep`), and a local
 `tests/integration.sh` against the real systemd.
 
+- `make integration`: automatic checks that never suspend (every timer is
+  turned off long before its deadline).
+- `make integration SUSPEND=1` adds three checks that do, each started only
+  after the user presses Enter: decaf suspends at the deadline while another
+  program holds a sleep lock; asleep at the deadline, the timer is skipped;
+  resuming inside the last minute shows the warning. A suspend is detected as
+  a gap of more than 5 s between the script's own polls.
+
 ## Open
 
 - The menu: designed after 2.0.
