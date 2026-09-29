@@ -6,9 +6,12 @@ MANDIR      = $(DESTDIR)$(PREFIX)/share/man/man1
 DOCDIR      = $(DESTDIR)$(PREFIX)/share/doc/decaf
 BASHCOMPDIR = $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 
-SHELL_SOURCES = src/decaf completions/decaf.bash scripts/*.sh
+SHELL_SOURCES = src/decaf completions/decaf.bash scripts/*.sh \
+                tests/helpers.bash tests/fakes/fake tests/*.bats
 
-.PHONY: all install uninstall check
+BATS ?= bats
+
+.PHONY: all install uninstall check test
 
 all:
 	@echo "Nothing to build. Run 'make install' (PREFIX=$(PREFIX))."
@@ -29,3 +32,7 @@ uninstall:
 check:
 	shellcheck -x $(SHELL_SOURCES)
 	shfmt -d $(SHELL_SOURCES)
+
+# Run the test suite (needs bats: pacman -S bash-bats).
+test:
+	$(BATS) tests

@@ -152,6 +152,7 @@ git push origin HEAD:master         # the AUR only accepts the master branch
 
 ```bash
 make check                                                   # shellcheck + shfmt, same as CI
+make test                                                    # bats test suite, same as CI
 make DESTDIR="$PWD/stage" PREFIX=/usr install && find stage  # what gets installed
 AUR_DRY_RUN=1 scripts/publish-aur.sh X.Y.Z                   # full AUR build of a tag, no push (tags after 1.0.5 only:
                                                              # older ones have no Makefile)
