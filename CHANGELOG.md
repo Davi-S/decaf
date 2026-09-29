@@ -6,12 +6,50 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+A ground-up rewrite. **Not compatible with 1.x**: commands, arguments and
+output all changed.
+
+### Changed
+
+- Commands are now `on DURATION`, `off` and `status` (were `start`, `stop`,
+  `status`).
+- `DURATION` is whole seconds, from 1 (was minutes by default, with units).
+- `status` prints `key=value` lines (`state`, `duration`, `started`, `until`,
+  `remaining`) and exits 0 when a timer is on, 1 when not.
+- Every outcome has its own exit status: 1 no timer, 2 usage error,
+  3 timer already on, 4 system error. Errors go to stderr.
+- `on` refuses to replace a running timer; `off` fails when there is none.
+- A timer is one transient user unit, `app-decaf.service`, whose process waits
+  for the deadline and suspends; the separate systemd timer unit is gone.
+- The deadline is noticed within milliseconds, also right after a resume.
+  A timer whose deadline passed while the system was asleep is skipped
+  (was: skipped only when noticed more than 30 s late).
+- Notifications come from the timer unit: set, skipped, turned off, failed.
+  Commands send none themselves.
+- Overriding another program's blocking lock at the deadline asks for your
+  password (polkit); unanswered, the timer fails after 25 s.
+- Dependencies: adds `glib2` (for `gdbus`); drops `rofi`.
+
 ### Added
 
-- `decaf version` / `--version`.
+- "Suspending soon" notification a minute before the deadline, or at once when
+  resuming within that last minute.
+- `--version`.
 - Man page and bash completion.
 - `Makefile` with `install` / `uninstall` (honours `PREFIX` and `DESTDIR`).
 - `LICENSE` file (MIT), installed by the AUR package.
+
+### Removed
+
+- The `menu` command (rofi). A redesigned menu is planned for a later release.
+- `help` command: use `--help`.
+
+### Fixed
+
+- `status` misreported the time left, depending on locale and date format.
+- `stop` announced "Decaf Off" even when no timer was running.
+- Errors from `systemd-run` were hidden.
+- Durations like `5x` were silently taken as 5 minutes.
 
 ## [1.0.5] - 2026-07-25
 

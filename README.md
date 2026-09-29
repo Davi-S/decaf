@@ -1,30 +1,23 @@
 # Decaf
 
-A lightweight, robust suspend timer for Linux.
+Suspend your Linux system after a while, from the command line or your scripts.
 
-`decaf` is the opposite of the classic "Caffeine" utility. Instead of keeping
-your computer awake, it allows you to easily schedule a system suspension
-(sleep) after a specific amount of time. It features a fully-fledged CLI backend
-and a clean, integrated Rofi GUI.
+`decaf on 1800` suspends the system in 30 minutes. `decaf off` cancels it.
+`decaf status` tells a script whether a timer is on and when it fires.
+It is the opposite of [expresso](https://github.com/Davi-S/expresso), which
+keeps the system awake for a while.
 
-### Features
-
-- **OS-Native Timers:** Uses `systemd-run` transient wall-clock timers (`--on-calendar`).
-  This accounts for system suspend/sleep periods, ensures absolute expiration, and
-  leaves zero background zombie processes.
-- **Unconditional Suspend:** Bypasses active inhibitor locks (like playing
-  videos or Steam downloads) to ensure the system _actually_ sleeps when you
-  tell it to.
-- **Integrated Frontend & Backend:** A single, clean Bash script manages both
-  the CLI logic and the Rofi graphical interface.
-- **Smart Notifications:** Native system notifications via `notify-send` for
-  timer activation, cancellation, and errors.
-
-## Requirements
-
-- **`systemd`**: For timer management and system suspension.
-- **`rofi`**: For the graphical menu.
-- **`libnotify`**: For `notify-send` desktop notifications.
+- **Native.** The timer is a transient systemd user unit; when it stops, for
+  any reason, nothing is left behind.
+- **Exact.** It fires at its wall-clock deadline, even across a suspend.
+  If the system was already asleep at the deadline, it skips instead of
+  suspending again as soon as you resume.
+- **Firm.** It suspends even if other programs hold locks against it (a
+  download, expresso). Overriding such a lock asks for your password; without
+  one there is no prompt.
+- **Warns you.** "Suspending soon" appears a minute before, so you can cancel.
+- **Scriptable.** stdout is data only, errors go to stderr, and every outcome
+  has its own exit status.
 
 ## Installation
 
@@ -36,7 +29,8 @@ paru -S decaf
 
 ### From source
 
-Dependencies: `bash`, `systemd`, `rofi`, `libnotify`, `make`.
+Dependencies: `bash`, `systemd`, `glib2` (for `gdbus`), `libnotify`, and `make`
+to install.
 
 ```bash
 git clone https://github.com/Davi-S/decaf.git
@@ -47,35 +41,57 @@ sudo make uninstall            # to remove
 
 ## Usage
 
-`decaf` functions as both a CLI tool and a GUI launcher.
-
-### Graphical Interface (Rofi)
-
-To open the interactive menu, run:
-
-```bash
-decaf menu
 ```
-
-### Command Line Interface
-
-You can interact with the backend directly from your terminal or custom scripts:
-
-```bash
-# Start a timer (defaults to minutes if no unit is provided)
-decaf start 15     # Suspends in 15 minutes
-decaf start 45m    # Suspends in 45 minutes
-decaf start 2h     # Suspends in 2 hours
-
-# Check the status of a running timer
+decaf on DURATION
+decaf off
 decaf status
-#> 14m
-
-# Cancel an active timer
-decaf stop
 ```
 
-See `man decaf` for the full reference.
+`DURATION` is in seconds, 1 or more.
+
+```bash
+decaf on 2700                 # suspend in 45 minutes
+decaf off
+```
+
+`status` prints `key=value` lines and exits 0 when a timer is on, 1 when not:
+
+```console
+$ decaf status
+state=on
+duration=2700
+started=1759158600
+until=1759161300
+remaining=2412
+$ decaf off && decaf status
+state=off
+```
+
+### Exit status
+
+| Code | Meaning |
+|---|---|
+| 0 | Success; for `status`, a timer is on |
+| 1 | No timer is on (`status`, `off`) |
+| 2 | Usage error |
+| 3 | A timer is already on (`on`) |
+| 4 | System error |
+
+### Scripting
+
+There is no configuration file: put your preferred durations in a keybinding,
+alias or script.
+
+```bash
+# Toggle a 30-minute timer, e.g. bound to a key
+decaf off 2>/dev/null || decaf on 1800
+
+# When it fires
+date -d "@$(decaf status | sed -n 's/^until=//p')"
+```
+
+See `man decaf` for the full reference, including how suspend, the warning and
+other programs' locks behave.
 
 ## Development
 
@@ -84,10 +100,10 @@ See `man decaf` for the full reference.
 - `make integration` tests against your real systemd session without
   suspending; run it before a release. `SUSPEND=1` adds checks that suspend
   the machine, each started only after you press Enter.
+- The design and the reasons behind it are in [`docs/DESIGN.md`](docs/DESIGN.md).
 - Record changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
 - Releases and AUR publishing are described in [`RELEASING.md`](RELEASING.md).
 
 ## License
 
 [MIT](LICENSE)
-

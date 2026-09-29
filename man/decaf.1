@@ -2,56 +2,187 @@
 .SH NAME
 decaf \- suspend the system after a while
 .SH SYNOPSIS
+.B decaf on
+.I DURATION
+.br
+.B decaf off
+.br
+.B decaf status
+.br
 .B decaf
-.I command
-.RI [ argument ]
+.BR \-\-help " | " \-\-version
 .SH DESCRIPTION
 .B decaf
-schedules a system suspend, using a transient
-.BR systemd-run (1)
-timer on the wall clock. When the timer fires, the system suspends even if
-other programs hold inhibitor locks. It can be driven from the command line or
-through a
-.BR rofi (1)
-menu.
+suspends the system after a given number of seconds, even if other programs
+try to keep it awake.
+It is meant to be scripted: output on stdout is data only, messages go to
+stderr, and every outcome has its own exit status.
+.PP
+A timer is a transient systemd user unit,
+.BR app-decaf.service .
+While the unit runs, a suspend is scheduled; there is no other state.
+Each user has at most one timer, shared by all their sessions.
+.PP
+.B decaf
+is the opposite of
+.BR expresso (1),
+which keeps the system awake for a while.
 .SH COMMANDS
 .TP
-.BI start " time"
-Suspend after
-.IR time .
-A bare number is taken as minutes; units such as
-.BR 90s ,
-.BR 45m ,
-.B 2h
-or
-.B 2h30m
-are accepted. Starting again replaces the current timer.
+.BI on " DURATION"
+Suspend the system in
+.I DURATION
+seconds.
+.I DURATION
+is a whole number from 1 to 2147483647, without sign or leading zeros.
+Fails if a timer is already on.
 .TP
-.B stop
-Cancel the timer.
+.B off
+Cancel the timer. Returns once it is fully cancelled.
 .TP
 .B status
-Print the time left, or
-.BR Inactive .
+Print the timer's state; see
+.BR "STATUS OUTPUT" .
 .TP
-.B menu
-Open the interactive rofi menu.
+.B \-\-help
+Print a usage summary.
 .TP
-.BR version ", " \-\-version ", " \-V
+.B \-\-version
 Print the version.
+.SH STATUS OUTPUT
+.B status
+prints
+.IB key = value
+lines.
+When no timer is on, the only line is
+.BR state=off .
+When a timer is on, all of these keys are printed, in this order:
 .TP
-.BR help ", " \-\-help ", " \-h
-Print usage information.
-.SH EXAMPLES
+.B state
+.BR on .
+.TP
+.B duration
+The
+.I DURATION
+given to
+.BR on .
+.TP
+.B started
+When the timer was set, as a Unix timestamp.
+.TP
+.B until
+When the system suspends, as a Unix timestamp.
+.TP
+.B remaining
+Seconds until then.
+.PP
+Example:
+.PP
+.RS
 .nf
-decaf start 30
-decaf start 1h
-decaf status
-decaf stop
+state=on
+duration=1800
+started=1759158600
+until=1759160400
+remaining=1740
 .fi
+.RE
+.SH TIMING AND SUSPEND
+The deadline is wall-clock time:
+.B on 1800
+means in 30 minutes from now, and time spent suspended counts.
+.PP
+Sixty seconds before the deadline, a "Suspending soon" notification gives you
+the chance to run
+.BR "decaf off" .
+If the system resumes within that last minute, the notification appears at
+once. Timers of 60 seconds or less have no warning.
+.PP
+If the system was already asleep at the deadline (you suspended it earlier and
+resumed later), the timer is skipped: it ends when the system resumes, without
+suspending it again.
+Suspending and resuming before the deadline keeps the timer.
+.PP
+At the deadline the system suspends even if other programs hold locks against
+it, such as a download or
+.BR expresso (1).
+Overriding such a blocking lock needs your password (polkit's
+.BR suspend-ignore-inhibit );
+a prompt appears at the deadline.
+If nobody answers it within 25 seconds, the system does not suspend and the
+timer ends as failed.
+Without blocking locks there is no prompt.
+.SH NOTIFICATIONS
+The timer unit itself sends desktop notifications, whatever started or stopped
+it: when the timer is set ("Decaf on"), shortly before the suspend ("Suspending
+soon"), when it is skipped or turned off ("Decaf off"), and when it fails
+("Decaf failed", with where to look in the journal).
+There is none when the system suspends.
+The commands send no notifications themselves, and
+.B on
+and
+.B off
+print nothing on success.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+For
+.BR status :
+a timer is on.
+.TP
+.B 1
+No timer is on
+.RB ( status ", " off ).
+.TP
+.B 2
+Usage error: unknown command or option, invalid or missing
+.IR DURATION .
+.TP
+.B 3
+A timer is already on
+.RB ( on ).
+.TP
+.B 4
+System error: systemd could not be reached, the timer could not be set or
+cancelled, or
+.B app-decaf.service
+exists but was not started by this version of
+.BR decaf .
+.SH EXAMPLES
+Suspend in 45 minutes:
+.PP
+.RS
+.nf
+decaf on 2700
+.fi
+.RE
+.PP
+Toggle a 30-minute timer, for example from a keybinding:
+.PP
+.RS
+.nf
+decaf off 2>/dev/null || decaf on 1800
+.fi
+.RE
+.PP
+Check for a timer, and read when it fires:
+.PP
+.RS
+.nf
+if decaf status >/dev/null; then
+    date \-d "@$(decaf status | sed \-n 's/^until=//p')"
+fi
+.fi
+.RE
+.SH FILES
+None. There is no configuration file; put your preferred durations in a
+keybinding, alias or script.
 .SH SEE ALSO
-.BR systemd-run (1),
+.BR expresso (1),
 .BR systemctl (1),
-.BR rofi (1)
+.BR systemd-run (1),
+.BR systemd-inhibit (1),
+.BR notify-send (1)
 .SH BUGS
 Report issues at https://github.com/Davi-S/decaf/issues

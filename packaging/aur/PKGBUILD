@@ -7,11 +7,11 @@
 pkgname=decaf
 pkgver=1.0.5
 pkgrel=1
-pkgdesc="A Rofi-based sleep timer utility"
+pkgdesc="Suspend the system after a while: a scriptable sleep timer"
 arch=('any')
 url="https://github.com/Davi-S/decaf"
 license=('MIT')
-depends=('bash' 'systemd' 'rofi' 'libnotify')
+depends=('bash' 'systemd' 'glib2' 'libnotify')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
