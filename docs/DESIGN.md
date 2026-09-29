@@ -85,6 +85,10 @@ decaf on 1800
 - **At the deadline, suspend is forced:** `systemctl suspend -i`, ignoring other
   programs' inhibitor locks (downloads, Steam, expresso). decaf wins over
   expresso: an explicit "sleep at 23:00" beats "stay awake".
+- **Permission.** Verified: logind's `CanSuspend` answers `yes` from inside a user
+  unit, so no password prompt. Overriding another user's *block* lock may still
+  need authentication (polkit's `suspend-ignore-inhibit`); then the suspend fails
+  and the "failed" notification says so.
 - **Suspended before the deadline, resumed after it:** the timer is skipped, not
   suspended again on resume (the system was asleep at the deadline: the goal was
   met).
@@ -119,5 +123,4 @@ discipline in place of types, bats with recording fakes (`systemd-run`,
 - How `_wait` tells "deadline reached while awake" from "deadline passed while asleep".
 - When the "Suspending soon" warning is sent if the system resumes inside the final 60 s.
 - How `_wait` reports its outcome (suspended, skipped, failed) to `_stopped`.
-- Whether polkit allows `systemctl suspend -i` from a user unit (verify on the real system).
 - The menu: designed after 2.0.
