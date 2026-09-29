@@ -1,337 +1,183 @@
 #!/usr/bin/env bash
-
-# Enforce strict error handling
-# -e: Exit immediately if a command exits with a non-zero status.
-# -u: Treat unset variables as an error.
-# -o pipefail: Return value of a pipeline is the status of the last command to exit with a non-zero status.
-set -euo pipefail
+#
+# decaf: suspend the system after a while.
+#
+# The design, and the reasons behind it, are in docs/DESIGN.md.
+#
+# Layers, top to bottom. Each calls only the layers below it.
+#   cli     argv → validated values; prints messages; maps results to exit codes
+#   core    timer operations on validated values: on, off, status
+#   system  the only code that runs external commands; validates what they
+#           return and reports its own failures (not written yet)
+#   values  pure functions: no I/O besides printing the result
+#
+# Conventions:
+#   - Globals are readonly constants. Everything else is `local`.
+#   - Functions return data on stdout and a status as their exit code.
+#     Only `main`'s caller exits.
+#   - Errors propagate explicitly with `|| return`. `set -e` is not relied on
+#     inside functions, because Bash disables it in many contexts.
+#   - The layer that detects a problem reports it, except the core: it returns
+#     a code, and the cli turns it into a message.
+#   - Never do arithmetic on an unvalidated string: Bash evaluates it as an
+#     expression, which can run commands. Validate with a regex first.
 
 VERSION="1.0.5"
+readonly VERSION
 
-# --- Configuration ---
-UNIT_NAME="decaf"
-TIMER_UNIT="${UNIT_NAME}.timer"
-SERVICE_UNIT="${UNIT_NAME}.service"
+# Exit codes. Each has one meaning across all commands.
+readonly EXIT_USAGE=2
+readonly EXIT_SYSTEM=4
 
-# Using -i to bypass inhibitor locks (like active videos or Steam downloads)
-# ensuring the computer always suspends when instructed.
-SUSPEND_CMD="systemctl suspend -i"
+readonly MAX_DURATION=2147483647
 
-# --- Functions ---
+# --- values ------------------------------------------------------------------
 
-show_help() {
+# is_duration STRING
+# Succeeds if STRING is a DURATION: whole seconds with no sign or leading zeros,
+# from 1 to MAX_DURATION.
+is_duration() {
+    local -r value="$1"
+    [[ "$value" =~ ^[1-9][0-9]*$ ]] || return 1
+    # Compare lengths before values, so a huge number can't overflow.
+    ((${#value} < ${#MAX_DURATION})) && return 0
+    ((${#value} == ${#MAX_DURATION} && value <= MAX_DURATION))
+}
+
+# format_status DURATION STARTED NOW
+# Print the `status` output for a running timer. All arguments must be validated.
+format_status() {
+    local -r duration="$1" started="$2" now="$3"
+    local -r until=$((started + duration))
+    printf '%s\n' \
+        "state=on" \
+        "duration=$duration" \
+        "started=$started" \
+        "until=$until" \
+        "remaining=$((until > now ? until - now : 0))"
+}
+
+# --- system ------------------------------------------------------------------
+
+# err MESSAGE: print an error message to stderr.
+err() {
+    printf 'decaf: %s\n' "$1" >&2
+}
+
+# --- core --------------------------------------------------------------------
+# Placeholders until the system layer exists (step 3 of the rewrite).
+
+core_on() {
+    err "'on' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+core_off() {
+    err "'off' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+core_status() {
+    err "'status' is not implemented yet"
+    return "$EXIT_SYSTEM"
+}
+
+# --- cli ---------------------------------------------------------------------
+
+# usage_error MESSAGE: report a usage error. Returns EXIT_USAGE, so callers can
+# write `check || usage_error "..." || return`.
+usage_error() {
+    err "$1"
+    printf "Try 'decaf --help' for more information.\n" >&2
+    return "$EXIT_USAGE"
+}
+
+cli_help() {
     cat <<EOF
-Usage: decaf <command> [argument]
+Usage: decaf on DURATION
+       decaf off
+       decaf status
+       decaf --help | --version
+
+Suspend the system after a while, even if other programs try to keep it awake.
 
 Commands:
-  start <time>   Starts a suspend timer. Defaults to minutes if no unit is given.
-                 Formats: '15', '15m', '15s', '1h', '2h30m'.
-  stop           Cancels any active suspend timer.
-  status         Returns the current timer status and time remaining.
-  menu           Opens the interactive Rofi GUI.
-  help           Shows this help message.
-  version        Shows the version.
+  on DURATION  Suspend in DURATION seconds (1 or more).
+  off          Cancel the timer.
+  status       Print the timer state as key=value lines.
 
-Examples:
-  decaf start 30
-  decaf status
-  decaf menu
+Exit codes: 0 success or timer on, 1 no timer, 2 usage error,
+            3 timer already on, 4 system error.
+
+See 'man decaf' for details.
 EOF
 }
 
-stop_timer() {
-    local quiet="${1:-false}"
-
-    # Suppress errors if the units don't exist (e.g., stopping when already stopped)
-    systemctl --user stop "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
-    # Clear the failed state just in case a previous run crashed or was manually killed
-    systemctl --user reset-failed "$TIMER_UNIT" "$SERVICE_UNIT" 2>/dev/null || true
-
-    if [[ "$quiet" != "true" ]]; then
-        # Send the "Off" notification
-        notify-send -a "decaf" "Decaf Off" "Suspend timer disabled"
-    fi
+# cli_no_args COMMAND ARG...
+# Succeeds if COMMAND was given no arguments.
+cli_no_args() {
+    local -r command="$1"
+    shift
+    (($# == 0)) || usage_error "'$command' takes no arguments"
 }
 
-parse_duration() {
-    local dur="$1"
-    if [[ "$dur" =~ ^[0-9]+$ ]]; then
-        dur="${dur}m"
-    fi
-
-    local us
-    us=$( (systemd-analyze timespan "$dur" 2>/dev/null || true) | awk '/μs:/ {print $2}')
-    if [[ -n "$us" && "$us" =~ ^[0-9]+$ ]]; then
-        echo $((us / 1000000))
-        return 0
-    fi
-
-    local total=0
-    local val=""
-    for ((i = 0; i < ${#dur}; i++)); do
-        local char="${dur:$i:1}"
-        if [[ "$char" =~ [0-9] ]]; then
-            val="${val}${char}"
-        else
-            case "$char" in
-            h | H)
-                total=$((total + ${val:-0} * 3600))
-                val=""
-                ;;
-            m | M)
-                total=$((total + ${val:-0} * 60))
-                val=""
-                ;;
-            s | S)
-                total=$((total + ${val:-0}))
-                val=""
-                ;;
-            esac
-        fi
+# cli_parse_on ARG...
+# Validate the arguments of `on`. Prints DURATION.
+cli_parse_on() {
+    local duration="" arg
+    for arg in "$@"; do
+        case "$arg" in
+        -*[!0-9]* | -)
+            usage_error "unknown option '$arg'" || return
+            ;;
+        *)
+            # Also reached by negative numbers, which is_duration rejects.
+            [[ -z "$duration" ]] || usage_error "unexpected argument '$arg'" || return
+            is_duration "$arg" ||
+                usage_error "invalid DURATION '$arg': expected whole seconds from 1 to $MAX_DURATION" ||
+                return
+            duration="$arg"
+            ;;
+        esac
     done
-    if [[ -n "$val" ]]; then
-        total=$((total + val * 60))
-    fi
-    echo "$total"
+    [[ -n "$duration" ]] || usage_error "missing DURATION" || return
+    printf '%s\n' "$duration"
 }
 
-trigger_suspend() {
-    local target_epoch="${1:-}"
-
-    if [[ -n "$target_epoch" && "$target_epoch" =~ ^[0-9]+$ ]]; then
-        local now_epoch
-        now_epoch=$(date +%s)
-        local diff=$((now_epoch - target_epoch))
-
-        # If the timer fired more than 30 seconds after its scheduled target time,
-        # it indicates the system was suspended/asleep when the target time passed.
-        if ((diff > 30)); then
-            notify-send -a "decaf" "Decaf" "Timer expired while system was suspended. Suspend skipped."
-            exit 0
-        fi
-    fi
-
-    eval "$SUSPEND_CMD"
+cli_on() {
+    local duration
+    duration="$(cli_parse_on "$@")" || return
+    core_on "$duration"
 }
 
-start_timer() {
-    local duration="$1"
-
-    if [[ -z "$duration" ]]; then
-        echo "Error: Duration not provided." >&2
-        show_help
-        exit 1
-    fi
-
-    # Default to minutes if the user inputs only digits
-    if [[ "$duration" =~ ^[0-9]+$ ]]; then
-        duration="${duration}m"
-    fi
-
-    local seconds
-    seconds=$(parse_duration "$duration")
-
-    if [[ -z "$seconds" || "$seconds" -le 0 ]]; then
-        echo "Error: Invalid duration format '$duration'." >&2
-        exit 1
-    fi
-
-    # Pass "true" so it silently resets without sending a notification
-    stop_timer "true"
-
-    local now_epoch
-    now_epoch=$(date +%s)
-    local target_epoch=$((now_epoch + seconds))
-
-    local target_time
-    target_time=$(date -d "@${target_epoch}" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
-
-    if [[ -z "$target_time" ]]; then
-        echo "Error: Failed to calculate target time." >&2
-        exit 1
-    fi
-
-    local decaf_bin
-    decaf_bin=$(readlink -f "$0" 2>/dev/null || command -v decaf || echo "decaf")
-
-    # Create the transient timer using systemd-run
-    # --on-calendar uses absolute wall-clock time
-    # Running decaf trigger passes target_epoch so decaf can verify it fired on time
-    systemd-run --user \
-        --unit="$UNIT_NAME" \
-        --on-calendar="$target_time" \
-        --timer-property="AccuracySec=1s" \
-        "$decaf_bin" trigger "$target_epoch" >/dev/null 2>&1
-
-    echo "Timer started: System will suspend in $duration."
-
-    # Send the "Active" notification
-    notify-send -a "decaf" "Decaf Active" "Suspend scheduled: $duration"
-}
-
-get_status() {
-    # Verify the timer is actually running at a system level
-    local state
-    state=$(systemctl --user is-active "$TIMER_UNIT" 2>/dev/null || true)
-
-    if [[ "$state" != "active" ]]; then
-        echo "Inactive"
-        return
-    fi
-
-    # Grab the raw list-timers output.
-    local timer_output
-    timer_output=$(systemctl --user list-timers "$TIMER_UNIT" --no-legend 2>/dev/null || true)
-
-    if [[ -z "$timer_output" ]]; then
-        echo "Active"
-        return
-    fi
-
-    # Extract the absolute wall-clock timestamp systemd calculated for us.
-    # systemctl list-timers format: DAY YYYY-MM-DD HH:MM:SS TZ ...
-    # We use awk to grab columns 2, 3, and 4 (Date, Time, Timezone).
-    local target_time
-    target_time=$(echo "$timer_output" | awk '{print $2, $3, $4}')
-
-    if [[ -z "$target_time" ]]; then
-        echo "Active"
-        return
-    fi
-
-    # Convert that timestamp to standard UNIX epoch seconds
-    local next_sec
-    next_sec=$(date -d "$target_time" +%s 2>/dev/null || true)
-
-    # Fallback if the date conversion fails for any reason
-    if [[ -z "$next_sec" ]]; then
-        echo "Active"
-        return
-    fi
-
-    local now_sec
-    now_sec=$(date +%s)
-    local diff_sec=$((next_sec - now_sec))
-
-    if ((diff_sec <= 0)); then
-        echo "Suspending..."
-        return
-    fi
-
-    local hours=$((diff_sec / 3600))
-    local mins=$(((diff_sec % 3600) / 60))
-
-    if ((hours > 0)); then
-        echo "${hours}h ${mins}m"
-    elif ((mins > 0)); then
-        echo "${mins}m"
-    else
-        echo "<1m"
-    fi
-}
-
-show_menu() {
-    # Ensure Rofi is installed before trying to run the GUI
-    if ! command -v rofi &>/dev/null; then
-        echo "Error: rofi is not installed or not in PATH." >&2
-        exit 1
-    fi
-
-    local current_status
-    current_status=$(get_status)
-
-    # Base options with Nerd Font icons
-    local options="15 min\n30 min\n1 hour\n2 hours\nCustom..."
-
-    # Inject the separator and Cancel option at the BOTTOM if a timer is running
-    if [[ "$current_status" != "Inactive" ]]; then
-        options="$options\n────────────────────────\nTurn Off ($current_status)"
-    fi
-
-    # rofi exits 1 if the user presses Escape. '|| true' prevents the script from crashing due to 'set -e'
-    local choice
-    choice=$(echo -e "$options" | rofi -dmenu -i -p "Decaf:" || true)
-
-    # Handle the selection, ensuring icons are included in the match strings
-    case "$choice" in
-    "15 min")
-        start_timer "15m"
+main() {
+    (($# > 0)) || usage_error "missing command" || return
+    local -r command="$1"
+    shift
+    case "$command" in
+    on) cli_on "$@" ;;
+    off)
+        cli_no_args "$command" "$@" || return
+        core_off
         ;;
-    "30 min")
-        start_timer "30m"
+    status)
+        cli_no_args "$command" "$@" || return
+        core_status
         ;;
-    "1 hour")
-        start_timer "1h"
+    --help)
+        cli_no_args "$command" "$@" || return
+        cli_help
         ;;
-    "2 hours")
-        start_timer "2h"
+    --version)
+        cli_no_args "$command" "$@" || return
+        printf 'decaf %s\n' "$VERSION"
         ;;
-    "Custom...")
-        local custom_time
-        custom_time=$(rofi -dmenu -p "Enter time (e.g., 45, 1h, 15s):" || true)
-        if [[ "$custom_time" =~ ^[0-9]+[a-zA-Z0-9\ ]*$ ]]; then
-            # Pass the raw input directly to the backend
-            start_timer "$custom_time"
-        elif [[ -n "$custom_time" ]]; then
-            # Sending the error as a notification instead of a blocking Rofi window
-            notify-send -u critical -a "decaf" "Error" "Invalid input: '$custom_time'. Please start with a number."
-        fi
-        ;;
-    "Turn Off"*)
-        stop_timer
-        ;;
-    "──────────────")
-        # The "dumb" separator was selected. Do nothing and exit cleanly.
-        exit 0
-        ;;
-    "")
-        # User pressed Escape or closed the window
-        exit 0
-        ;;
-    *)
-        notify-send -u critical -a "decaf" "Error" "Unknown selection."
-        exit 1
-        ;;
+    *) usage_error "unknown command '$command'" ;;
     esac
 }
 
-# --- Main Logic Routing ---
-
-# Ensure at least one argument is provided
-if [[ $# -eq 0 ]]; then
-    show_help
-    exit 1
+# Run only when executed, not when sourced (the tests source this file).
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    set -euo pipefail
+    main "$@"
 fi
-
-COMMAND="$1"
-shift
-
-case "$COMMAND" in
-start)
-    start_timer "${1:-}"
-    ;;
-stop)
-    stop_timer
-    echo "Timer stopped."
-    ;;
-status)
-    get_status
-    ;;
-trigger)
-    trigger_suspend "${1:-}"
-    ;;
-menu)
-    show_menu
-    ;;
-help | --help | -h)
-    show_help
-    ;;
-version | --version | -V)
-    echo "decaf $VERSION"
-    ;;
-*)
-    echo "Error: Unknown command '$COMMAND'" >&2
-    show_help
-    exit 1
-    ;;
-esac
