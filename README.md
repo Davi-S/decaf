@@ -31,7 +31,18 @@ and a clean, integrated Rofi GUI.
 ### Arch Linux (AUR)
 
 ```bash
-paru -Syu decaf
+paru -S decaf
+```
+
+### From source
+
+Dependencies: `bash`, `systemd`, `rofi`, `libnotify`, `make`.
+
+```bash
+git clone https://github.com/Davi-S/decaf.git
+cd decaf
+sudo make install              # installs to /usr/local; use PREFIX=/usr to change
+sudo make uninstall            # to remove
 ```
 
 ## Usage
@@ -44,7 +55,6 @@ To open the interactive menu, run:
 
 ```bash
 decaf menu
-
 ```
 
 ### Command Line Interface
@@ -64,4 +74,16 @@ decaf status
 # Cancel an active timer
 decaf stop
 ```
+
+See `man decaf` for the full reference.
+
+## Development
+
+- `make check` runs `shellcheck` and `shfmt`, the same checks as CI.
+- Record changes under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
+- Releases and AUR publishing are described in [`RELEASING.md`](RELEASING.md).
+
+## License
+
+[MIT](LICENSE)
 

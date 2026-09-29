@@ -6,6 +6,8 @@
 # -o pipefail: Return value of a pipeline is the status of the last command to exit with a non-zero status.
 set -euo pipefail
 
+VERSION="1.0.5"
+
 # --- Configuration ---
 UNIT_NAME="decaf"
 TIMER_UNIT="${UNIT_NAME}.timer"
@@ -28,6 +30,7 @@ Commands:
   status         Returns the current timer status and time remaining.
   menu           Opens the interactive Rofi GUI.
   help           Shows this help message.
+  version        Shows the version.
 
 Examples:
   decaf start 30
@@ -57,7 +60,7 @@ parse_duration() {
     fi
 
     local us
-    us=$( (systemd-analyze timespan "$dur" 2>/dev/null || true) | awk '/μs:/ {print $2}' )
+    us=$( (systemd-analyze timespan "$dur" 2>/dev/null || true) | awk '/μs:/ {print $2}')
     if [[ -n "$us" && "$us" =~ ^[0-9]+$ ]]; then
         echo $((us / 1000000))
         return 0
@@ -65,15 +68,24 @@ parse_duration() {
 
     local total=0
     local val=""
-    for (( i=0; i<${#dur}; i++ )); do
+    for ((i = 0; i < ${#dur}; i++)); do
         local char="${dur:$i:1}"
         if [[ "$char" =~ [0-9] ]]; then
             val="${val}${char}"
         else
             case "$char" in
-                h|H) total=$((total + ${val:-0} * 3600)); val="" ;;
-                m|M) total=$((total + ${val:-0} * 60)); val="" ;;
-                s|S) total=$((total + ${val:-0})); val="" ;;
+            h | H)
+                total=$((total + ${val:-0} * 3600))
+                val=""
+                ;;
+            m | M)
+                total=$((total + ${val:-0} * 60))
+                val=""
+                ;;
+            s | S)
+                total=$((total + ${val:-0}))
+                val=""
+                ;;
             esac
         fi
     done
@@ -93,7 +105,7 @@ trigger_suspend() {
 
         # If the timer fired more than 30 seconds after its scheduled target time,
         # it indicates the system was suspended/asleep when the target time passed.
-        if (( diff > 30 )); then
+        if ((diff > 30)); then
             notify-send -a "decaf" "Decaf" "Timer expired while system was suspended. Suspend skipped."
             exit 0
         fi
@@ -313,6 +325,9 @@ menu)
     ;;
 help | --help | -h)
     show_help
+    ;;
+version | --version | -V)
+    echo "decaf $VERSION"
     ;;
 *)
     echo "Error: Unknown command '$COMMAND'" >&2

@@ -1,0 +1,22 @@
+# Maintainer: Davi Alves Sampaio <davialvessampaio00@gmail.com>
+#
+# This is the TEMPLATE for the AUR package. Do not bump pkgver/pkgrel or
+# checksums here by hand: scripts/publish-aur.sh sets them when publishing.
+# Edit this file only to change packaging (dependencies, install steps, ...).
+
+pkgname=decaf
+pkgver=1.0.5
+pkgrel=1
+pkgdesc="A Rofi-based sleep timer utility"
+arch=('any')
+url="https://github.com/Davi-S/decaf"
+license=('MIT')
+depends=('bash' 'systemd' 'rofi' 'libnotify')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "$pkgname-$pkgver"
+    make DESTDIR="$pkgdir" PREFIX=/usr install
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

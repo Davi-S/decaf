@@ -1,0 +1,57 @@
+.TH DECAF 1 "2026-09-29" "decaf" "User Commands"
+.SH NAME
+decaf \- suspend the system after a while
+.SH SYNOPSIS
+.B decaf
+.I command
+.RI [ argument ]
+.SH DESCRIPTION
+.B decaf
+schedules a system suspend, using a transient
+.BR systemd-run (1)
+timer on the wall clock. When the timer fires, the system suspends even if
+other programs hold inhibitor locks. It can be driven from the command line or
+through a
+.BR rofi (1)
+menu.
+.SH COMMANDS
+.TP
+.BI start " time"
+Suspend after
+.IR time .
+A bare number is taken as minutes; units such as
+.BR 90s ,
+.BR 45m ,
+.B 2h
+or
+.B 2h30m
+are accepted. Starting again replaces the current timer.
+.TP
+.B stop
+Cancel the timer.
+.TP
+.B status
+Print the time left, or
+.BR Inactive .
+.TP
+.B menu
+Open the interactive rofi menu.
+.TP
+.BR version ", " \-\-version ", " \-V
+Print the version.
+.TP
+.BR help ", " \-\-help ", " \-h
+Print usage information.
+.SH EXAMPLES
+.nf
+decaf start 30
+decaf start 1h
+decaf status
+decaf stop
+.fi
+.SH SEE ALSO
+.BR systemd-run (1),
+.BR systemctl (1),
+.BR rofi (1)
+.SH BUGS
+Report issues at https://github.com/Davi-S/decaf/issues
