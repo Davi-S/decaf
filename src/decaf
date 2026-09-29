@@ -8,7 +8,7 @@
 #   cli     argv → validated values; prints messages; maps results to exit codes
 #   core    timer operations on validated values: on, off, status
 #   system  the only code that runs external commands; validates what they
-#           return and reports its own failures (not written yet)
+#           return and reports its own failures
 #   values  pure functions: no I/O besides printing the result
 #
 # Conventions:
@@ -26,10 +26,24 @@ VERSION="1.0.5"
 readonly VERSION
 
 # Exit codes. Each has one meaning across all commands.
+readonly EXIT_NO_TIMER=1
 readonly EXIT_USAGE=2
+readonly EXIT_ALREADY_ON=3
 readonly EXIT_SYSTEM=4
 
 readonly MAX_DURATION=2147483647
+
+# The systemd user unit that runs the timer. It exists only while a timer is on.
+readonly UNIT="app-decaf.service"
+
+# `_wait` exits with this code when it skips the suspend; the unit counts it as
+# a success (SuccessExitStatus), and `_stopped` reads it (step 4).
+readonly WAIT_SKIPPED=10
+
+# This script's absolute path, for the unit to run `_wait` and `_stopped`.
+SELF="${BASH_SOURCE[0]}"
+[[ "$SELF" == /* ]] || SELF="$PWD/$SELF"
+readonly SELF
 
 # --- values ------------------------------------------------------------------
 
@@ -42,6 +56,60 @@ is_duration() {
     # Compare lengths before values, so a huge number can't overflow.
     ((${#value} < ${#MAX_DURATION})) && return 0
     ((${#value} == ${#MAX_DURATION} && value <= MAX_DURATION))
+}
+
+# is_timestamp STRING
+# Succeeds if STRING is a Unix timestamp: at most 12 digits (year 33658), which
+# leaves room to add any DURATION without overflow.
+is_timestamp() {
+    [[ "$1" =~ ^(0|[1-9][0-9]{0,11})$ ]]
+}
+
+# is_safe_path STRING
+# Succeeds if STRING is an absolute path systemd reads literally: no spaces,
+# quotes, `$` or `%`, which systemd would split, unquote or expand.
+is_safe_path() {
+    [[ "$1" =~ ^/[A-Za-z0-9/._+-]+$ ]]
+}
+
+# parse_timer_values DURATION STARTED
+# Validate a timer's values, as stored in the unit's environment. Prints them
+# space-separated, in this order.
+parse_timer_values() {
+    is_duration "$1" || return 1
+    is_timestamp "$2" || return 1
+    printf '%s %s\n' "$1" "$2"
+}
+
+# parse_unit_properties TEXT
+# Parse the output of `systemctl show --property=ActiveState --property=Environment`.
+# Prints "inactive", or "active DURATION STARTED" for a running timer.
+# Fails if the unit is active but lacks valid decaf values.
+parse_unit_properties() {
+    local line active_state="" environment=""
+    while IFS= read -r line; do
+        case "$line" in
+        ActiveState=*) active_state="${line#*=}" ;;
+        Environment=*) environment="${line#*=}" ;;
+        esac
+    done <<<"$1"
+
+    if [[ "$active_state" != active ]]; then
+        printf 'inactive\n'
+        return 0
+    fi
+
+    local variables variable duration="" started=""
+    read -ra variables <<<"$environment"
+    for variable in "${variables[@]}"; do
+        case "$variable" in
+        DECAF_DURATION=*) duration="${variable#*=}" ;;
+        DECAF_STARTED=*) started="${variable#*=}" ;;
+        esac
+    done
+    local values
+    values="$(parse_timer_values "$duration" "$started")" || return 1
+    printf 'active %s\n' "$values"
 }
 
 # format_status DURATION STARTED NOW
@@ -64,22 +132,92 @@ err() {
     printf 'decaf: %s\n' "$1" >&2
 }
 
-# --- core --------------------------------------------------------------------
-# Placeholders until the system layer exists (step 3 of the rewrite).
+# sys_now: print the current Unix time.
+sys_now() {
+    local now
+    if ! now="$(date +%s)" || ! is_timestamp "$now"; then
+        err "could not read the current time"
+        return "$EXIT_SYSTEM"
+    fi
+    printf '%s\n' "$now"
+}
 
+# sys_unit_state
+# Print the timer's state as parse_unit_properties does: "inactive", or
+# "active DURATION STARTED".
+sys_unit_state() {
+    local properties
+    properties="$(systemctl --user show --property=ActiveState --property=Environment "$UNIT")" || {
+        err "could not read the timer state from systemd"
+        return "$EXIT_SYSTEM"
+    }
+    parse_unit_properties "$properties" || {
+        err "$UNIT is running but was not started by this version of decaf"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_unit_start DURATION STARTED
+# Start the timer unit. It runs `_wait`, which suspends the system at the
+# deadline, and `_stopped` when it stops.
+sys_unit_start() {
+    local -r duration="$1" started="$2"
+    is_safe_path "$SELF" || {
+        err "cannot run from '$SELF': the path may only contain letters, digits and / . _ + -"
+        return "$EXIT_SYSTEM"
+    }
+    systemd-run --user --quiet --collect \
+        --unit="$UNIT" --slice=app.slice \
+        --description="decaf: suspend the system after a while" \
+        --setenv=DECAF_STARTED="$started" \
+        --setenv=DECAF_DURATION="$duration" \
+        --property=ExecStopPost="$SELF _stopped" \
+        --property=SuccessExitStatus="$WAIT_SKIPPED" \
+        -- "$SELF" _wait || {
+        err "could not start the timer"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_unit_stop: stop the timer unit. Returns once it is fully stopped.
+sys_unit_stop() {
+    systemctl --user stop "$UNIT" || {
+        err "could not stop the timer"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# --- core --------------------------------------------------------------------
+
+# core_on DURATION
 core_on() {
-    err "'on' is not implemented yet"
-    return "$EXIT_SYSTEM"
+    local -r duration="$1"
+    local state now
+    state="$(sys_unit_state)" || return
+    [[ "$state" == inactive ]] || return "$EXIT_ALREADY_ON"
+    now="$(sys_now)" || return
+    sys_unit_start "$duration" "$now"
 }
 
 core_off() {
-    err "'off' is not implemented yet"
-    return "$EXIT_SYSTEM"
+    local state
+    state="$(sys_unit_state)" || return
+    [[ "$state" != inactive ]] || return "$EXIT_NO_TIMER"
+    sys_unit_stop
 }
 
+# core_status: print the status record. Returns EXIT_NO_TIMER when off.
 core_status() {
-    err "'status' is not implemented yet"
-    return "$EXIT_SYSTEM"
+    local state now
+    state="$(sys_unit_state)" || return
+    if [[ "$state" == inactive ]]; then
+        printf 'state=off\n'
+        return "$EXIT_NO_TIMER"
+    fi
+    local duration started
+    read -r _ duration started <<<"$state"
+    now="$(sys_now)" || return
+    format_status "$duration" "$started" "$now"
 }
 
 # --- cli ---------------------------------------------------------------------
@@ -147,7 +285,27 @@ cli_parse_on() {
 cli_on() {
     local duration
     duration="$(cli_parse_on "$@")" || return
-    core_on "$duration"
+    core_on "$duration" && return
+    local -r code=$?
+    if ((code == EXIT_ALREADY_ON)); then
+        err "a timer is already on; run 'decaf off' first"
+    fi
+    return "$code"
+}
+
+cli_off() {
+    cli_no_args off "$@" || return
+    core_off && return
+    local -r code=$?
+    if ((code == EXIT_NO_TIMER)); then
+        err "no timer is on"
+    fi
+    return "$code"
+}
+
+cli_status() {
+    cli_no_args status "$@" || return
+    core_status
 }
 
 main() {
@@ -156,14 +314,8 @@ main() {
     shift
     case "$command" in
     on) cli_on "$@" ;;
-    off)
-        cli_no_args "$command" "$@" || return
-        core_off
-        ;;
-    status)
-        cli_no_args "$command" "$@" || return
-        core_status
-        ;;
+    off) cli_off "$@" ;;
+    status) cli_status "$@" ;;
     --help)
         cli_no_args "$command" "$@" || return
         cli_help

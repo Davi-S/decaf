@@ -92,3 +92,89 @@ usage_hint="Try 'decaf --help' for more information."
         assert_stderr "decaf: unknown option '$value'"$'\n'"$usage_hint"
     done
 }
+
+# --- is_timestamp, is_safe_path ----------------------------------------------
+
+@test "is_timestamp accepts up to 12 digits without leading zeros" {
+    local value
+    for value in 0 1 1759158600 999999999999; do
+        is_timestamp "$value" || fail "rejected '$value'"
+    done
+    for value in "" -1 01 1.5 1759158600x 1000000000000; do
+        if is_timestamp "$value"; then
+            fail "accepted '$value'"
+        fi
+    done
+}
+
+@test "is_safe_path accepts absolute paths of plain characters only" {
+    local value
+    for value in /usr/bin/decaf /home/me/src/decaf-2.0/src/decaf /opt/a_b+c/decaf; do
+        is_safe_path "$value" || fail "rejected '$value'"
+    done
+    # shellcheck disable=SC2016 # a literal $ is the point
+    for value in "" decaf ./decaf "/my tools/decaf" '/a$b/decaf' /a%b/decaf '/a"b' "/a;b"; do
+        if is_safe_path "$value"; then
+            fail "accepted '$value'"
+        fi
+    done
+}
+
+# --- parse_timer_values, parse_unit_properties -------------------------------
+
+@test "parse_timer_values accepts valid values and prints them" {
+    run parse_timer_values 1800 1759158600
+    assert_status 0
+    assert_output "1800 1759158600"
+}
+
+@test "parse_timer_values rejects any invalid value" {
+    local values
+    for values in "0 1" "60m 1" "60 x" "60 01"; do
+        # shellcheck disable=SC2086 # split into two arguments on purpose
+        run parse_timer_values $values
+        assert_status 1
+    done
+    run parse_timer_values "" ""
+    assert_status 1
+}
+
+@test "parse_unit_properties: an inactive or unknown unit" {
+    run parse_unit_properties $'ActiveState=inactive\nEnvironment='
+    assert_status 0
+    assert_output "inactive"
+}
+
+@test "parse_unit_properties: every state other than active is inactive" {
+    local state
+    for state in failed activating deactivating reloading; do
+        run parse_unit_properties "ActiveState=$state"$'\nEnvironment='
+        assert_output "inactive"
+    done
+}
+
+@test "parse_unit_properties: an active unit" {
+    run parse_unit_properties $'ActiveState=active\nEnvironment=DECAF_STARTED=1759158600 DECAF_DURATION=1800'
+    assert_status 0
+    assert_output "active 1800 1759158600"
+}
+
+@test "parse_unit_properties: property and variable order do not matter" {
+    run parse_unit_properties $'Environment=DECAF_DURATION=60 DECAF_STARTED=5\nActiveState=active'
+    assert_output "active 60 5"
+}
+
+@test "parse_unit_properties: an active unit with missing or invalid values fails" {
+    local environment
+    for environment in \
+        "" \
+        "DECAF_STARTED=1" \
+        "DECAF_STARTED=1 DECAF_DURATION=0" \
+        "DECAF_STARTED=1 DECAF_DURATION=60m" \
+        "DECAF_STARTED=x DECAF_DURATION=60" \
+        "OTHER=* DECAF_DURATION=60"; do
+        run parse_unit_properties "ActiveState=active"$'\n'"Environment=$environment"
+        assert_status 1
+        assert_output ""
+    done
+}
