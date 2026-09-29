@@ -85,10 +85,19 @@ decaf on 1800
 - **At the deadline, suspend is forced:** `systemctl suspend -i`, ignoring other
   programs' inhibitor locks (downloads, Steam, expresso). decaf wins over
   expresso: an explicit "sleep at 23:00" beats "stay awake".
-- **Permission.** Verified: logind's `CanSuspend` answers `yes` from inside a user
-  unit, so no password prompt. Overriding another user's *block* lock may still
-  need authentication (polkit's `suspend-ignore-inhibit`); then the suspend fails
-  and the "failed" notification says so.
+- **Permission.** A plain suspend from the user unit needs no password
+  (polkit `suspend`: `yes` for the active session; `CanSuspend` answers `yes`).
+  Suspending past a *blocking* lock (expresso, a Steam download), any user's
+  including your own, is polkit's `suspend-ignore-inhibit`: `auth_admin_keep`,
+  so a password prompt appears at the deadline. Kept on purpose (decision D):
+  - no blocking lock: no prompt;
+  - blocking lock, you are there: type your password within 25 s;
+  - blocking lock, nobody answers: after 25 s (the D-Bus call timeout) the
+    prompt closes itself, `systemctl` fails with "Connection timed out", and
+    the timer ends as failed ("Decaf failed", critical). Measured on the real
+    system; it never hangs.
+  A polkit rule removing the prompt was rejected: it would let every user
+  ignore suspend locks without a password.
 - **Suspended before the deadline, resumed after it:** the timer is skipped, not
   suspended again on resume (the system was asleep at the deadline: the goal was
   met).

@@ -207,8 +207,9 @@ if [[ "$suspend_checks" == true ]]; then
     section "Suspend check 1: decaf suspends at the deadline, overriding a sleep lock"
     cat <<'EOF'
   A 20-second timer starts while another program holds a lock that blocks
-  suspend (like expresso would). decaf must suspend anyway, at the deadline.
-  When the machine is asleep, wake it (open the lid or press a key).
+  suspend (like expresso would). Suspending past it needs your password: a
+  prompt appears at the deadline; type it within 25 s. decaf must then
+  suspend. When the machine is asleep, wake it (open the lid or press a key).
 EOF
     read -rp "  Press Enter to start... "
     systemd-inhibit --what=sleep --who=decaf-integration --why="decaf must override this" \
@@ -223,9 +224,9 @@ EOF
     inhibit_pid=""
     check "the machine suspended once" 1 "${#gap_starts[@]}"
     if ((${#gap_starts[@]} >= 1)); then
-        # Other programs' delay locks can postpone a suspend by a few seconds.
-        check_range "it suspended at the deadline (ms after it; delay locks allow up to 7000)" \
-            -1000 7000 $((gap_starts[0] - until * 1000))
+        # Includes typing the password (the prompt allows 25 s).
+        check_range "it suspended at the deadline (ms after it, password included)" \
+            -1000 30000 $((gap_starts[0] - until * 1000))
     fi
     check "no timer is left" 1 "$(code status)"
     confirm "No 'Suspending soon' warning appeared (the timer was 20 s)?"
