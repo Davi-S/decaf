@@ -93,6 +93,33 @@ decaf on 1800
   suspended again on resume (the system was asleep at the deadline: the goal was
   met).
 - **Suspended and resumed before the deadline:** the timer keeps its deadline.
+
+### The waiter (`_wait`) at the end
+
+The waiter is expresso's (deadline on the wall clock, `read -t` on a logind
+monitor so it wakes within milliseconds of the deadline or of a resume), with
+three additions:
+
+- **Awake or asleep at the deadline.** While suspended, the waiter is frozen
+  too; on resume it only sees that the deadline has passed. If it first sees
+  the deadline more than 5 seconds late, the system was asleep then: skip.
+  Otherwise suspend. (Awake, it always sees the deadline within a fraction of a
+  second; 26 ms after resume was measured with expresso.) This also works in
+  the fallback mode without the monitor.
+- **The "Suspending soon" warning** is sent once, the first time the waiter is
+  awake within the final 60 seconds: normally at deadline − 60 s, or right after
+  a resume that lands inside that window. Not sent when DURATION ≤ 60.
+- **Outcome, reported by exit code** for `_stopped` to pick the notification:
+
+  | `_wait` result | Seen by `_stopped` as | Notification |
+  |---|---|---|
+  | exit 0: suspend requested | `exited` / `0` | none |
+  | exit 10: skipped | `exited` / `10` | Skipped |
+  | killed (`decaf off`) | `killed` / signal | Turned off |
+  | anything else (e.g. the suspend was refused) | | Failed |
+
+  The unit sets `SuccessExitStatus=10`, so a skipped timer is not logged as a
+  failed unit.
 - **Action:** suspend only (no hibernate or poweroff).
 - Carried from expresso: install path check, one timer per user, concurrent `on`
   rejected by systemd, internal `_wait` / `_stopped` subcommands.
@@ -120,7 +147,4 @@ discipline in place of types, bats with recording fakes (`systemd-run`,
 
 ## Open
 
-- How `_wait` tells "deadline reached while awake" from "deadline passed while asleep".
-- When the "Suspending soon" warning is sent if the system resumes inside the final 60 s.
-- How `_wait` reports its outcome (suspended, skipped, failed) to `_stopped`.
 - The menu: designed after 2.0.
