@@ -37,8 +37,24 @@ readonly MAX_DURATION=2147483647
 readonly UNIT="app-decaf.service"
 
 # `_wait` exits with this code when it skips the suspend; the unit counts it as
-# a success (SuccessExitStatus), and `_stopped` reads it (step 4).
+# a success (SuccessExitStatus), and `_stopped` reads it.
 readonly WAIT_SKIPPED=10
+
+# Noticing the deadline more than this many seconds late means the system was
+# asleep at the deadline: skip. Awake, the waiter notices within milliseconds.
+readonly SKIP_AFTER=5
+
+# The "Suspending soon" warning is due this many seconds before the deadline.
+readonly WARN_BEFORE=60
+
+# How long notifications stay on screen, in milliseconds.
+readonly NOTIFY_MS=2000
+readonly WARN_MS=6000
+
+# Watches logind's signals. The one that matters is PrepareForSleep(false),
+# sent on resume; any signal only makes the waiter recheck the clock.
+readonly LOGIND_MONITOR=(gdbus monitor --system
+    --dest org.freedesktop.login1 --object-path /org/freedesktop/login1)
 
 # This script's absolute path, for the unit to run `_wait` and `_stopped`.
 SELF="${BASH_SOURCE[0]}"
@@ -125,6 +141,36 @@ format_status() {
         "remaining=$((until > now ? until - now : 0))"
 }
 
+# format_at MOMENT NOW
+# Print a moment for a notification: the time if it is today, the weekday and
+# time within 6 days, the full date otherwise. Always in English.
+format_at() {
+    local -r moment="$1" now="$2"
+    local LC_ALL=C moment_day now_day
+    printf -v moment_day '%(%F)T' "$moment"
+    printf -v now_day '%(%F)T' "$now"
+    if [[ "$moment_day" == "$now_day" ]]; then
+        printf '%(%H:%M)T\n' "$moment"
+    elif ((moment - now < 6 * 86400)); then
+        printf '%(%a %H:%M)T\n' "$moment"
+    else
+        printf '%(%F %H:%M)T\n' "$moment"
+    fi
+}
+
+# stop_reason EXIT_CODE EXIT_STATUS
+# Map systemd's exit information for `_wait` to how the timer ended:
+# "suspended", "skipped", "stopped" (killed, as by `decaf off`) or "failed"
+# (anything else, including no information).
+stop_reason() {
+    case "$1:$2" in
+    exited:0) printf 'suspended\n' ;;
+    "exited:$WAIT_SKIPPED") printf 'skipped\n' ;;
+    killed:*) printf 'stopped\n' ;;
+    *) printf 'failed\n' ;;
+    esac
+}
+
 # --- system ------------------------------------------------------------------
 
 # err MESSAGE: print an error message to stderr.
@@ -187,6 +233,78 @@ sys_unit_stop() {
     }
 }
 
+# sys_timer_env
+# Print the timer's values from the environment the unit gives `_wait` and
+# `_stopped`: "DURATION STARTED".
+sys_timer_env() {
+    parse_timer_values "${DECAF_DURATION-}" "${DECAF_STARTED-}" || {
+        err "missing or invalid DECAF_* variables; '_wait' and '_stopped' are run by the timer unit"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_stop_reason
+# Print how `_wait` ended, from the variables systemd gives ExecStopPost:
+# see stop_reason.
+sys_stop_reason() {
+    stop_reason "${EXIT_CODE-}" "${EXIT_STATUS-}"
+}
+
+# sys_notify EXPIRE_MS URGENCY TITLE BODY
+sys_notify() {
+    notify-send --app-name=decaf --expire-time="$1" --urgency="$2" "$3" "$4" || {
+        err "could not send a notification"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_wait_until TARGET
+# Return once the wall clock reaches TARGET, including right after a resume from
+# suspend, when `sleep` alone would be late (it doesn't count suspended time).
+# Prints the time at which TARGET was noticed.
+sys_wait_until() {
+    local -r target="$1"
+    local now fd line watching=true
+    local -i code=0 status
+
+    # Started before the first clock check, so no resume can be missed.
+    exec {fd}< <(exec "${LOGIND_MONITOR[@]}")
+    local -r monitor_pid=$!
+
+    while true; do
+        now="$(sys_now)" || {
+            code=$?
+            break
+        }
+        ((now < target)) || break
+        if [[ "$watching" == true ]]; then
+            # Returns on a logind signal (status 0), at the target (> 128),
+            # or at once if the monitor died (1).
+            status=0
+            read -r -t "$((target - now))" -u "$fd" line || status=$?
+            if ((status > 0 && status <= 128)); then
+                watching=false
+                err "cannot watch logind for resume; after a suspend, the timer may end late"
+            fi
+        else
+            sleep "$((target - now))" || true
+        fi
+    done
+
+    kill "$monitor_pid" 2>/dev/null || true
+    exec {fd}<&-
+    ((code == 0)) || return "$code"
+    printf '%s\n' "$now"
+}
+
+# sys_suspend: suspend the system now, ignoring other programs' inhibitor locks.
+sys_suspend() {
+    systemctl suspend -i || {
+        err "could not suspend"
+        return "$EXIT_SYSTEM"
+    }
+}
+
 # --- core --------------------------------------------------------------------
 
 # core_on DURATION
@@ -218,6 +336,56 @@ core_status() {
     read -r _ duration started <<<"$state"
     now="$(sys_now)" || return
     format_status "$duration" "$started" "$now"
+}
+
+# core_wait
+# Run by the unit. Announces the timer, warns before the deadline, then
+# suspends at the deadline, or skips if the system was asleep then.
+core_wait() {
+    local values duration started now at noticed
+    values="$(sys_timer_env)" || return
+    read -r duration started <<<"$values"
+    local -r deadline=$((started + duration))
+    now="$(sys_now)" || return
+    at="$(format_at "$deadline" "$now")"
+    # The timer matters more than announcing it.
+    sys_notify "$NOTIFY_MS" normal "Decaf on" "Suspending at $at" || true
+
+    if ((duration > WARN_BEFORE)); then
+        noticed="$(sys_wait_until $((deadline - WARN_BEFORE)))" || return
+        # Only if awake before the deadline: at the warning time, or on a
+        # resume inside the final minute.
+        if ((noticed < deadline)); then
+            sys_notify "$WARN_MS" normal "Suspending soon" "At $at · run 'decaf off' to cancel" || true
+        fi
+    fi
+
+    noticed="$(sys_wait_until "$deadline")" || return
+    if ((noticed - deadline > SKIP_AFTER)); then
+        return "$WAIT_SKIPPED"
+    fi
+    sys_suspend
+}
+
+# core_stopped
+# Run by systemd after the unit stops, for any reason: announces how it ended.
+core_stopped() {
+    case "$(sys_stop_reason)" in
+    suspended) return 0 ;;
+    skipped)
+        local values duration started now
+        values="$(sys_timer_env)" || return
+        read -r duration started <<<"$values"
+        now="$(sys_now)" || return
+        sys_notify "$NOTIFY_MS" normal "Decaf off" \
+            "Skipped: the system was asleep at $(format_at $((started + duration)) "$now")"
+        ;;
+    stopped) sys_notify "$NOTIFY_MS" normal "Decaf off" "Turned off" ;;
+    *)
+        sys_notify "$NOTIFY_MS" critical "Decaf failed" \
+            "Could not suspend. See: journalctl --user -u ${UNIT%.service}"
+        ;;
+    esac
 }
 
 # --- cli ---------------------------------------------------------------------
@@ -323,6 +491,15 @@ main() {
     --version)
         cli_no_args "$command" "$@" || return
         printf 'decaf %s\n' "$VERSION"
+        ;;
+    # Internal: run by the timer unit, not by users (see docs/DESIGN.md).
+    _wait)
+        cli_no_args "$command" "$@" || return
+        core_wait
+        ;;
+    _stopped)
+        cli_no_args "$command" "$@" || return
+        core_stopped
         ;;
     *) usage_error "unknown command '$command'" ;;
     esac

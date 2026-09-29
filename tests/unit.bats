@@ -178,3 +178,40 @@ usage_hint="Try 'decaf --help' for more information."
         assert_output ""
     done
 }
+
+# --- format_at, stop_reason --------------------------------------------------
+# 1759158600 is Mon 2025-09-29 15:10 UTC; tests run with TZ=UTC.
+
+@test "format_at: time only when the moment is today" {
+    assert_equal "$(format_at 1759160400 1759158600)" "15:40"
+}
+
+@test "format_at: weekday when within 6 days" {
+    assert_equal "$(format_at 1759421400 1759158600)" "Thu 16:10"
+}
+
+@test "format_at: full date when further away" {
+    assert_equal "$(format_at 1761750600 1759158600)" "2025-10-29 15:10"
+}
+
+@test "format_at: a moment in the past today is still a time" {
+    assert_equal "$(format_at 1759158000 1759158600)" "15:00"
+}
+
+@test "format_at: English weekdays whatever the locale" {
+    local -r locale="$(locale -a 2>/dev/null | grep -iE '^(pt_BR|de_DE|fr_FR)\.utf-?8$' | head -1)"
+    [[ -n "$locale" ]] || skip "no non-English locale installed"
+    LC_ALL="$locale"
+    assert_equal "$(format_at 1759421400 1759158600)" "Thu 16:10"
+}
+
+@test "stop_reason maps the waiter's exit information to how the timer ended" {
+    assert_equal "$(stop_reason exited 0)" "suspended"
+    assert_equal "$(stop_reason exited 10)" "skipped"
+    assert_equal "$(stop_reason killed TERM)" "stopped"
+    assert_equal "$(stop_reason killed KILL)" "stopped"
+    assert_equal "$(stop_reason exited 1)" "failed"
+    assert_equal "$(stop_reason exited 4)" "failed"
+    assert_equal "$(stop_reason dumped SEGV)" "failed"
+    assert_equal "$(stop_reason "" "")" "failed"
+}

@@ -120,6 +120,9 @@ three additions:
 
   The unit sets `SuccessExitStatus=10`, so a skipped timer is not logged as a
   failed unit.
+- **Never suspends on an error.** If the clock can't be read while waiting, or
+  the timer's values are invalid, `_wait` exits 4 (failed) without suspending.
+- A failed "Decaf on" or "Suspending soon" notification does not cancel the timer.
 - **Action:** suspend only (no hibernate or poweroff).
 - Carried from expresso: install path check, one timer per user, concurrent `on`
   rejected by systemd, internal `_wait` / `_stopped` subcommands.
