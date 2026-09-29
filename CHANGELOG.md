@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-29
+
 A ground-up rewrite. **Not compatible with 1.x**: commands, arguments and
 output all changed.
 

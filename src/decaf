@@ -22,7 +22,7 @@
 #   - Never do arithmetic on an unvalidated string: Bash evaluates it as an
 #     expression, which can run commands. Validate with a regex first.
 
-VERSION="1.0.5"
+VERSION="2.0.0"
 readonly VERSION
 
 # Exit codes. Each has one meaning across all commands.
