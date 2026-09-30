@@ -107,3 +107,16 @@ setup() {
     refute_hanging gdbus # the failed check above killed it
     exec {fd}<&-
 }
+
+@test "concurrent calls are logged as whole lines" {
+    # The waiter runs gdbus in the background while other commands run; the
+    # fakes must not interleave their log lines.
+    local i
+    for ((i = 0; i < 40; i++)); do
+        systemctl --user show app-decaf.service &
+        gdbus monitor --system --dest org.freedesktop.login1 &
+    done
+    wait
+    assert_equal "$(calls | wc -l)" 80
+    assert_equal "$(grep -cvxE '(systemctl --user show app-decaf\.service|gdbus monitor --system --dest org\.freedesktop\.login1)' "$FAKE_DIR/calls.log")" 0
+}
