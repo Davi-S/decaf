@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-21
+
 ### Added
 
 - `on --notify` and `off --notify` also notify when there is nothing to do:
