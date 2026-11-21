@@ -42,7 +42,7 @@ usage_hint="Try 'decaf --help' for more information."
 
 @test "commands without arguments reject arguments" {
     local cmd
-    for cmd in off status --help --version _wait _stopped; do
+    for cmd in off --help --version _wait _stopped; do
         run --separate-stderr "$DECAF" "$cmd" extra
         assert_status 2
         assert_stderr "decaf: '$cmd' takes no arguments"$'\n'"$usage_hint"
@@ -51,6 +51,8 @@ usage_hint="Try 'decaf --help' for more information."
 
 @test "usage errors never touch the system" {
     run "$DECAF" on 10m
+    assert_status 2
+    run "$DECAF" status --notify extra
     assert_status 2
     assert_equal "$(calls)" ""
 }
@@ -105,6 +107,65 @@ assert_timer_started() {
     assert_output "$(printf '%s\n' state=on duration=1800 started=1759158600 \
         until=1759160400 remaining=1740)"
     assert_stderr ""
+}
+
+@test "status: sends no notification" {
+    fake_timer_on 1800 1759158600
+    fake_now 1759158660
+    run "$DECAF" status
+    refute_called notify-send
+}
+
+@test "status --notify: no timer" {
+    fake_timer_off
+    run --separate-stderr "$DECAF" status --notify
+    assert_status 1
+    assert_output "state=off"
+    assert_stderr ""
+    assert_notified 2000 normal "Decaf off" "No timer is on"
+}
+
+@test "status --notify: a running timer" {
+    fake_timer_on 1800 1759158600
+    fake_now 1759158660
+    run --separate-stderr "$DECAF" status --notify
+    assert_status 0
+    assert_output "$(printf '%s\n' state=on duration=1800 started=1759158600 \
+        until=1759160400 remaining=1740)"
+    assert_stderr ""
+    assert_notified 2000 normal "Decaf on" "Suspending at 15:40 (29m left)"
+}
+
+@test "status --notify: a failed notification is a system error, after the output" {
+    fake_timer_on 1800 1759158600
+    fake_now 1759158660
+    fake notify-send --exit 1
+    run --separate-stderr "$DECAF" status --notify
+    assert_status 4
+    assert_output "$(printf '%s\n' state=on duration=1800 started=1759158600 \
+        until=1759160400 remaining=1740)"
+    assert_stderr "decaf: could not send a notification"
+
+    fake_timer_off
+    run --separate-stderr "$DECAF" status --notify
+    assert_status 4
+    assert_output "state=off"
+}
+
+@test "status --notify: a system error sends no notification" {
+    fake systemctl --args "$SHOW_ARGS" --exit 1
+    run "$DECAF" status --notify
+    assert_status 4
+    refute_called notify-send
+}
+
+@test "status: arguments other than --notify are usage errors" {
+    run --separate-stderr "$DECAF" status extra
+    assert_status 2
+    assert_stderr "decaf: unexpected argument 'extra'"$'\n'"$usage_hint"
+    run --separate-stderr "$DECAF" status --now
+    assert_status 2
+    assert_stderr "decaf: unknown option '--now'"$'\n'"$usage_hint"
 }
 
 @test "status: systemd unreachable is a system error" {
@@ -242,7 +303,7 @@ assert_notifications() { # COUNT
     assert_stderr ""
     ((SECONDS <= 4)) || fail "took $SECONDS s"
     assert_notified 2000 normal "Decaf on" "Suspending at 15:40"
-    assert_notified 6000 normal "Suspending soon" "At 15:40 · run 'decaf off' to cancel"
+    assert_notified 6000 normal "Suspending soon" "At 15:40 - run 'decaf off' to cancel"
     assert_notifications 2
     assert_called systemctl suspend -i
     assert_called gdbus "${MONITOR_ARGS[@]}"
@@ -259,7 +320,7 @@ assert_notifications() { # COUNT
     run --separate-stderr "$DECAF" _wait
     assert_status 0
     ((SECONDS <= 2)) || fail "took $SECONDS s: it waited instead of rechecking"
-    assert_notified 6000 normal "Suspending soon" "At 15:40 · run 'decaf off' to cancel"
+    assert_notified 6000 normal "Suspending soon" "At 15:40 - run 'decaf off' to cancel"
     assert_called systemctl suspend -i
     refute_hanging gdbus
 }

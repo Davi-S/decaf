@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `status --notify` also shows the timer's state as a desktop notification,
+  for keybindings: "Decaf on" with `Suspending at 15:40 (29m left)`, or
+  "Decaf off" with `No timer is on`. The output and exit code are those of
+  `status`.
+
+### Changed
+
+- The "Suspending soon" notification separates its parts with a plain hyphen
+  (` - `) instead of a middle dot: `At 15:40 - run 'decaf off' to cancel`.
+
 ## [2.0.0] - 2026-09-29
 
 A ground-up rewrite. **Not compatible with 1.x**: commands, arguments and

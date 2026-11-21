@@ -20,7 +20,7 @@ This file records decisions. Open items are listed at the end.
 ```
 decaf on DURATION
 decaf off
-decaf status
+decaf status [--notify]
 decaf --help
 decaf --version
 ```
@@ -29,7 +29,8 @@ decaf --version
   `2147483647`. There is no `0`: to suspend now, use `systemctl suspend`.
 - **No config file**, no options besides `--help` and `--version`.
 - **stdout is data only; messages and errors go to stderr.**
-- **The CLI never sends notifications.** The unit sends all of them.
+- **The CLI sends no notifications of its own.** The unit sends all of them,
+  except the one `status --notify` asks for.
 - **`off` is synchronous:** when it returns, the timer is gone and `status` says off.
 - A usage error prints `decaf: <problem>` and
   `Try 'decaf --help' for more information.` to stderr, and exits 2.
@@ -60,6 +61,9 @@ remaining=1740
 
 - When on, all five keys are always present. `until` is when the system suspends.
 - When off, the only line is `state=off`.
+- `--notify` also shows the state as a notification (see Notifications), for
+  keybindings. The output and exit code are the same; a notification that
+  fails is exit 4, after the output.
 
 ## Runtime model
 
@@ -138,17 +142,20 @@ three additions:
 
 ### Notifications
 
-Sent only by the unit, with `notify-send --app-name=decaf`, normal urgency except
-failures. Separate notifications, no replacing. Always English.
+Sent by the unit, and by `status --notify` on request, with `notify-send
+--app-name=decaf`, normal urgency except failures. Separate notifications, no
+replacing. Always English.
 
 | Event | Title | Body | Shown for |
 |---|---|---|---|
 | Timer set | Decaf on | `Suspending at 23:00` (today) / `Suspending at Tue 09:00` (within 6 days) / `Suspending at 2025-10-29 15:10` | 2 s |
-| 60 s before the deadline, if awake and DURATION > 60 | Suspending soon | `At 23:00 · run 'decaf off' to cancel` | 6 s |
+| 60 s before the deadline, if awake and DURATION > 60 | Suspending soon | `At 23:00 - run 'decaf off' to cancel` | 6 s |
 | Suspended | (none: the screen goes off, and a notification waiting on resume would confuse) | | |
 | Skipped | Decaf off | `Skipped: the system was asleep at 23:00` | 2 s |
 | Turned off | Decaf off | `Turned off` | 2 s |
 | Failed | Decaf failed | `Could not suspend. See: journalctl --user -u app-decaf` (critical) | 2 s |
+| `status --notify`, on | Decaf on | `Suspending at 23:00 (29m left)`. The time left is in its two largest units, rounded down (`2d 3h`, `1h 5m`, `29m`, `45s`). | 2 s |
+| `status --notify`, off | Decaf off | `No timer is on` | 2 s |
 
 ## Code structure and testing
 

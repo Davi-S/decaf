@@ -93,6 +93,38 @@ usage_hint="Try 'decaf --help' for more information."
     done
 }
 
+# --- cli_parse_status --------------------------------------------------------
+
+@test "cli_parse_status: no options" {
+    run cli_parse_status
+    assert_status 0
+    assert_output "false"
+}
+
+@test "cli_parse_status: --notify" {
+    run cli_parse_status --notify
+    assert_status 0
+    assert_output "true"
+}
+
+@test "cli_parse_status: repeated --notify" {
+    run --separate-stderr cli_parse_status --notify --notify
+    assert_status 2
+    assert_stderr "decaf: option '--notify' given twice"$'\n'"$usage_hint"
+}
+
+@test "cli_parse_status: unknown option" {
+    run --separate-stderr cli_parse_status --now
+    assert_status 2
+    assert_stderr "decaf: unknown option '--now'"$'\n'"$usage_hint"
+}
+
+@test "cli_parse_status: unexpected argument" {
+    run --separate-stderr cli_parse_status 60
+    assert_status 2
+    assert_stderr "decaf: unexpected argument '60'"$'\n'"$usage_hint"
+}
+
 # --- is_timestamp, is_safe_path ----------------------------------------------
 
 @test "is_timestamp accepts up to 12 digits without leading zeros" {
@@ -179,7 +211,7 @@ usage_hint="Try 'decaf --help' for more information."
     done
 }
 
-# --- format_at, stop_reason --------------------------------------------------
+# --- format_at, format_left, describe_timer, stop_reason ---------------------
 # 1759158600 is Mon 2025-09-29 15:10 UTC; tests run with TZ=UTC.
 
 @test "format_at: time only when the moment is today" {
@@ -196,6 +228,26 @@ usage_hint="Try 'decaf --help' for more information."
 
 @test "format_at: a moment in the past today is still a time" {
     assert_equal "$(format_at 1759158000 1759158600)" "15:00"
+}
+
+@test "format_left: the two largest units, rounded down" {
+    assert_equal "$(format_left 0)" "0s left"
+    assert_equal "$(format_left 59)" "59s left"
+    assert_equal "$(format_left 60)" "1m left"
+    assert_equal "$(format_left 1799)" "29m left"
+    assert_equal "$(format_left 3600)" "1h 0m left"
+    assert_equal "$(format_left 3959)" "1h 5m left"
+    assert_equal "$(format_left 86400)" "1d 0h left"
+    assert_equal "$(format_left 2147483647)" "24855d 3h left"
+}
+
+@test "describe_timer: when it suspends and the time left" {
+    assert_equal "$(describe_timer 1759160400 1759158660)" "Suspending at 15:40 (29m left)"
+    assert_equal "$(describe_timer 1759421400 1759158600)" "Suspending at Thu 16:10 (3d 1h left)"
+}
+
+@test "describe_timer: no negative time left once the deadline passed" {
+    assert_equal "$(describe_timer 1759158600 1759158610)" "Suspending at 15:10 (0s left)"
 }
 
 @test "format_at: English weekdays whatever the locale" {

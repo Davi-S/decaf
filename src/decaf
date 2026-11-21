@@ -5,7 +5,7 @@
 # The design, and the reasons behind it, are in docs/DESIGN.md.
 #
 # Layers, top to bottom. Each calls only the layers below it.
-#   cli     argv → validated values; prints messages; maps results to exit codes
+#   cli     argv -> validated values; prints messages; maps results to exit codes
 #   core    timer operations on validated values: on, off, status
 #   system  the only code that runs external commands; validates what they
 #           return and reports its own failures
@@ -156,6 +156,32 @@ format_at() {
     else
         printf '%(%F %H:%M)T\n' "$moment"
     fi
+}
+
+# format_left SECONDS
+# Print the time left, for a notification, in its two largest units: "2d 3h
+# left", "1h 5m left", "29m left" or "45s left". Rounded down, so it never
+# shows more time than there is.
+format_left() {
+    local -r seconds="$1"
+    if ((seconds >= 86400)); then
+        printf '%dd %dh left\n' $((seconds / 86400)) $((seconds % 86400 / 3600))
+    elif ((seconds >= 3600)); then
+        printf '%dh %dm left\n' $((seconds / 3600)) $((seconds % 3600 / 60))
+    elif ((seconds >= 60)); then
+        printf '%dm left\n' $((seconds / 60))
+    else
+        printf '%ds left\n' "$seconds"
+    fi
+}
+
+# describe_timer DEADLINE NOW
+# Print the body of the `status --notify` notification for a running timer,
+# e.g. "Suspending at 15:40 (29m left)".
+describe_timer() {
+    local -r deadline="$1" now="$2"
+    printf 'Suspending at %s (%s)\n' "$(format_at "$deadline" "$now")" \
+        "$(format_left $((deadline > now ? deadline - now : 0)))"
 }
 
 # stop_reason EXIT_CODE EXIT_STATUS
@@ -324,18 +350,28 @@ core_off() {
     sys_unit_stop
 }
 
-# core_status: print the status record. Returns EXIT_NO_TIMER when off.
+# core_status NOTIFY
+# Print the status record and, with NOTIFY true, also show the state as a
+# notification. Returns EXIT_NO_TIMER when off.
 core_status() {
+    local -r notify="$1"
     local state now
     state="$(sys_unit_state)" || return
     if [[ "$state" == inactive ]]; then
         printf 'state=off\n'
+        if [[ "$notify" == true ]]; then
+            sys_notify "$NOTIFY_MS" normal "Decaf off" "No timer is on" || return
+        fi
         return "$EXIT_NO_TIMER"
     fi
     local duration started
     read -r _ duration started <<<"$state"
     now="$(sys_now)" || return
     format_status "$duration" "$started" "$now"
+    if [[ "$notify" == true ]]; then
+        sys_notify "$NOTIFY_MS" normal "Decaf on" \
+            "$(describe_timer $((started + duration)) "$now")" || return
+    fi
 }
 
 # core_wait
@@ -356,7 +392,7 @@ core_wait() {
         # Only if awake before the deadline: at the warning time, or on a
         # resume inside the final minute.
         if ((noticed < deadline)); then
-            sys_notify "$WARN_MS" normal "Suspending soon" "At $at · run 'decaf off' to cancel" || true
+            sys_notify "$WARN_MS" normal "Suspending soon" "At $at - run 'decaf off' to cancel" || true
         fi
     fi
 
@@ -402,7 +438,7 @@ cli_help() {
     cat <<EOF
 Usage: decaf on DURATION
        decaf off
-       decaf status
+       decaf status [--notify]
        decaf --help | --version
 
 Suspend the system after a while, even if other programs try to keep it awake.
@@ -411,6 +447,7 @@ Commands:
   on DURATION  Suspend in DURATION seconds (1 or more).
   off          Cancel the timer.
   status       Print the timer state as key=value lines.
+      --notify Also show the state as a desktop notification.
 
 Exit codes: 0 success or timer on, 1 no timer, 2 usage error,
             3 timer already on, 4 system error.
@@ -471,9 +508,27 @@ cli_off() {
     return "$code"
 }
 
+# cli_parse_status ARG...
+# Validate the arguments of `status`. Prints NOTIFY: `true` or `false`.
+cli_parse_status() {
+    local notify=false arg
+    for arg in "$@"; do
+        case "$arg" in
+        --notify)
+            [[ "$notify" == false ]] || usage_error "option '--notify' given twice" || return
+            notify=true
+            ;;
+        -*) usage_error "unknown option '$arg'" || return ;;
+        *) usage_error "unexpected argument '$arg'" || return ;;
+        esac
+    done
+    printf '%s\n' "$notify"
+}
+
 cli_status() {
-    cli_no_args status "$@" || return
-    core_status
+    local notify
+    notify="$(cli_parse_status "$@")" || return
+    core_status "$notify"
 }
 
 main() {

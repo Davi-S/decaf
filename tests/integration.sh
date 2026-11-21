@@ -174,8 +174,10 @@ check "the unit is running" active "$(unit_property ActiveState)"
 check "the unit is in app.slice" app.slice "$(unit_property Slice)"
 check "the unit counts exit 10 (skipped) as success" 10 "$(unit_property SuccessExitStatus)"
 check "on again is refused (exit 3)" 3 "$(code on 60)"
+check "status --notify: on (exit 0)" 0 "$(code status --notify)"
 check "off succeeds" 0 "$(code off)"
 check "off is synchronous: status is off right after" 1 "$(code status)"
+check "status --notify: off (exit 1)" 1 "$(code status --notify)"
 check "off again: no timer (exit 1)" 1 "$(code off)"
 
 # -----------------------------------------------------------------------------
@@ -197,9 +199,11 @@ fi
 
 cat <<'EOF'
 
-  You should have seen two notifications, each for about 2 seconds:
+  You should have seen four notifications, each for about 2 seconds:
     Decaf on   Suspending at HH:MM
+    Decaf on   Suspending at HH:MM (9m left)   (status --notify)
     Decaf off  Turned off
+    Decaf off  No timer is on                   (status --notify)
 EOF
 
 # -----------------------------------------------------------------------------
@@ -255,7 +259,7 @@ EOF
             fail "the suspend did not span the deadline (suspend before $(at "$until"), resume after $(at $((until + 5))))"
         fi
     fi
-    confirm "Did you see 'Decaf off · Skipped: the system was asleep at HH:MM'?"
+    confirm "Did you see 'Decaf off - Skipped: the system was asleep at HH:MM'?"
 
     section "Suspend check 3: resuming inside the last minute shows the warning"
     cat <<'EOF'
@@ -275,7 +279,7 @@ EOF
         check_range "decaf suspended at the deadline (ms after it)" -1000 7000 \
             $((gap_starts[1] - until * 1000))
     fi
-    confirm "Did 'Suspending soon · At HH:MM' appear right after you resumed?"
+    confirm "Did 'Suspending soon - At HH:MM' appear right after you resumed?"
 fi
 
 # -----------------------------------------------------------------------------

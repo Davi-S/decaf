@@ -1,4 +1,4 @@
-.TH DECAF 1 "2026-09-29" "decaf" "User Commands"
+.TH DECAF 1 "2026-11-21" "decaf" "User Commands"
 .SH NAME
 decaf \- suspend the system after a while
 .SH SYNOPSIS
@@ -8,6 +8,7 @@ decaf \- suspend the system after a while
 .B decaf off
 .br
 .B decaf status
+.RB [ \-\-notify ]
 .br
 .B decaf
 .BR \-\-help " | " \-\-version
@@ -43,6 +44,13 @@ Cancel the timer. Returns once it is fully cancelled.
 .B status
 Print the timer's state; see
 .BR "STATUS OUTPUT" .
+.RS
+.TP
+.B \-\-notify
+Also show the state as a desktop notification; see
+.BR NOTIFICATIONS .
+The output and exit status are the same.
+.RE
 .TP
 .B \-\-help
 Print a usage summary.
@@ -118,7 +126,12 @@ it: when the timer is set ("Decaf on"), shortly before the suspend ("Suspending
 soon"), when it is skipped or turned off ("Decaf off"), and when it fails
 ("Decaf failed", with where to look in the journal).
 There is none when the system suspends.
-The commands send no notifications themselves, and
+.PP
+.B status \-\-notify
+shows the timer's state on request, for example from a keybinding: "Decaf on"
+with when it suspends and the time left ("Suspending at 15:40 (29m left)"), or
+"Decaf off" with "No timer is on".
+Otherwise the commands send no notifications themselves, and
 .B on
 and
 .B off
@@ -148,7 +161,10 @@ System error: systemd could not be reached, the timer could not be set or
 cancelled, or
 .B app-decaf.service
 exists but was not started by this version of
-.BR decaf .
+.BR decaf ,
+or the notification of
+.B status \-\-notify
+could not be sent.
 .SH EXAMPLES
 Suspend in 45 minutes:
 .PP
@@ -163,6 +179,14 @@ Toggle a 30-minute timer, for example from a keybinding:
 .RS
 .nf
 decaf off 2>/dev/null || decaf on 1800
+.fi
+.RE
+.PP
+Show the timer's state, for example from a keybinding:
+.PP
+.RS
+.nf
+decaf status \-\-notify >/dev/null
 .fi
 .RE
 .PP
