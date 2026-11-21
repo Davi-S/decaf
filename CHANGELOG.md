@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-21
+
 ### Added
 
 - `status --notify` also shows the timer's state as a desktop notification,
