@@ -59,7 +59,17 @@ usage_hint="Try 'decaf --help' for more information."
 @test "cli_parse_on: a duration" {
     run cli_parse_on 1800
     assert_status 0
-    assert_output "1800"
+    assert_output "1800 false"
+}
+
+@test "cli_parse_on: --notify, before or after the duration" {
+    run cli_parse_on 1800 --notify
+    assert_output "1800 true"
+    run cli_parse_on --notify 60
+    assert_output "60 true"
+    run --separate-stderr cli_parse_on 60 --notify --notify
+    assert_status 2
+    assert_stderr "decaf: option '--notify' given twice"$'\n'"$usage_hint"
 }
 
 @test "cli_parse_on: missing duration" {
@@ -93,34 +103,34 @@ usage_hint="Try 'decaf --help' for more information."
     done
 }
 
-# --- cli_parse_status --------------------------------------------------------
+# --- cli_parse_notify --------------------------------------------------------
 
-@test "cli_parse_status: no options" {
-    run cli_parse_status
+@test "cli_parse_notify: no options" {
+    run cli_parse_notify
     assert_status 0
     assert_output "false"
 }
 
-@test "cli_parse_status: --notify" {
-    run cli_parse_status --notify
+@test "cli_parse_notify: --notify" {
+    run cli_parse_notify --notify
     assert_status 0
     assert_output "true"
 }
 
-@test "cli_parse_status: repeated --notify" {
-    run --separate-stderr cli_parse_status --notify --notify
+@test "cli_parse_notify: repeated --notify" {
+    run --separate-stderr cli_parse_notify --notify --notify
     assert_status 2
     assert_stderr "decaf: option '--notify' given twice"$'\n'"$usage_hint"
 }
 
-@test "cli_parse_status: unknown option" {
-    run --separate-stderr cli_parse_status --now
+@test "cli_parse_notify: unknown option" {
+    run --separate-stderr cli_parse_notify --now
     assert_status 2
     assert_stderr "decaf: unknown option '--now'"$'\n'"$usage_hint"
 }
 
-@test "cli_parse_status: unexpected argument" {
-    run --separate-stderr cli_parse_status 60
+@test "cli_parse_notify: unexpected argument" {
+    run --separate-stderr cli_parse_notify 60
     assert_status 2
     assert_stderr "decaf: unexpected argument '60'"$'\n'"$usage_hint"
 }

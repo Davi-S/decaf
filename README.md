@@ -16,8 +16,8 @@ keeps the system awake for a while.
   download, expresso). Overriding such a lock asks for your password; without
   one there is no prompt.
 - **Warns you.** "Suspending soon" appears a minute before, so you can cancel.
-  `decaf status --notify` shows the timer's state on request, e.g. from a
-  keybinding.
+  On request, e.g. from a keybinding, `--notify` shows the timer's state, or
+  that there was nothing to do.
 - **Scriptable.** stdout is data only, errors go to stderr, and every outcome
   has its own exit status.
 
@@ -44,8 +44,8 @@ sudo make uninstall            # to remove
 ## Usage
 
 ```
-decaf on DURATION
-decaf off
+decaf on DURATION [--notify]
+decaf off [--notify]
 decaf status [--notify]
 ```
 
@@ -73,6 +73,10 @@ state=off
 notification: "Decaf on" with `Suspending at 15:40 (29m left)`, or "Decaf off"
 with `No timer is on`.
 
+`on --notify` and `off --notify` also notify when there is nothing to do:
+"Decaf already on" with the running timer, or "Decaf already off". When they
+do something, the timer's own notification is enough.
+
 ### Exit status
 
 | Code | Meaning |
@@ -91,6 +95,10 @@ alias or script.
 ```bash
 # Toggle a 30-minute timer, e.g. bound to a key
 decaf off 2>/dev/null || decaf on 1800
+
+# Separate keys for on and off, notifying even when there is nothing to do
+decaf on 1800 --notify
+decaf off --notify
 
 # Show the state, e.g. bound to a key
 decaf status --notify >/dev/null

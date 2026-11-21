@@ -9,11 +9,15 @@ _decaf() {
         return 0
     fi
 
-    # Only `status` has an option to offer, once: `on` takes free-form
-    # seconds, and the other commands take no arguments.
-    if [[ "${COMP_WORDS[1]}" == status ]] && ((COMP_CWORD == 2)); then
+    # `on`, `off` and `status` take --notify, offered until it has been used.
+    # DURATION is free-form seconds, so there is nothing to offer for it.
+    case "${COMP_WORDS[1]}" in
+    on | off | status) ;;
+    *) return 0 ;;
+    esac
+    local -r used=" ${COMP_WORDS[*]:2:COMP_CWORD-2} "
+    [[ "$used" == *" --notify "* ]] ||
         mapfile -t COMPREPLY < <(compgen -W "--notify" -- "$cur")
-    fi
 }
 
 complete -F _decaf decaf

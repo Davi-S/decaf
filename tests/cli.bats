@@ -13,7 +13,7 @@ usage_hint="Try 'decaf --help' for more information."
     run --separate-stderr "$DECAF" --help
     assert_status 0
     assert_stderr ""
-    [[ "${lines[0]}" == "Usage: decaf on DURATION" ]] ||
+    [[ "${lines[0]}" == "Usage: decaf on DURATION [--notify]" ]] ||
         fail "unexpected first line: ${lines[0]}"
 }
 
@@ -42,7 +42,7 @@ usage_hint="Try 'decaf --help' for more information."
 
 @test "commands without arguments reject arguments" {
     local cmd
-    for cmd in off --help --version _wait _stopped; do
+    for cmd in --help --version _wait _stopped; do
         run --separate-stderr "$DECAF" "$cmd" extra
         assert_status 2
         assert_stderr "decaf: '$cmd' takes no arguments"$'\n'"$usage_hint"
@@ -69,6 +69,11 @@ fake_timer_off() {
 # fake_timer_on DURATION STARTED: systemd reports a running timer unit.
 fake_timer_on() {
     fake systemctl --args "$SHOW_ARGS" --stdout "ActiveState=active"$'\n'"Environment=DECAF_STARTED=$2 DECAF_DURATION=$1"
+}
+
+# assert_notified EXPIRE_MS URGENCY TITLE BODY: decaf sent this notification.
+assert_notified() { # EXPIRE_MS URGENCY TITLE BODY
+    assert_called notify-send --app-name=decaf "--expire-time=$1" "--urgency=$2" "$3" "$4"
 }
 
 # fake_now TIMESTAMP: the current time, as `date +%s` prints it.
@@ -244,12 +249,83 @@ assert_timer_started() {
     assert_called systemctl --user stop app-decaf.service
 }
 
+@test "on: sends no notification of its own" {
+    fake_timer_off
+    fake_now 1759158600
+    run "$DECAF" on 1800 --notify
+    assert_status 0
+    refute_called notify-send
+
+    fake_timer_on 60 1759158600
+    run "$DECAF" on 1800
+    assert_status 3
+    refute_called notify-send
+}
+
+@test "on --notify: a timer already on is shown" {
+    fake_timer_on 1800 1759158600
+    fake_now 1759158660
+    run --separate-stderr "$DECAF" on 60 --notify
+    assert_status 3
+    assert_output ""
+    assert_stderr "decaf: a timer is already on; run 'decaf off' first"
+    assert_notified 2000 normal "Decaf already on" "Suspending at 15:40 (29m left)"
+    refute_called systemd-run
+}
+
+@test "on --notify: a failed notification is a system error" {
+    fake_timer_on 1800 1759158600
+    fake_now 1759158660
+    fake notify-send --exit 1
+    run --separate-stderr "$DECAF" on 60 --notify
+    assert_status 4
+    assert_stderr "decaf: could not send a notification"
+}
+
 @test "off: no timer" {
     fake_timer_off
     run --separate-stderr "$DECAF" off
     assert_status 1
     assert_stderr "decaf: no timer is on"
     [[ "$(calls systemctl)" != *" stop "* ]] || fail "stop was called"
+}
+
+@test "off: sends no notification of its own" {
+    fake_timer_on 60 1759158600
+    run "$DECAF" off --notify
+    assert_status 0
+    refute_called notify-send
+
+    fake_timer_off
+    run "$DECAF" off
+    assert_status 1
+    refute_called notify-send
+}
+
+@test "off --notify: no timer is shown" {
+    fake_timer_off
+    run --separate-stderr "$DECAF" off --notify
+    assert_status 1
+    assert_output ""
+    assert_stderr "decaf: no timer is on"
+    assert_notified 2000 normal "Decaf already off" "No timer is on"
+}
+
+@test "off --notify: a failed notification is a system error" {
+    fake_timer_off
+    fake notify-send --exit 1
+    run --separate-stderr "$DECAF" off --notify
+    assert_status 4
+    assert_stderr "decaf: could not send a notification"
+}
+
+@test "off: arguments other than --notify are usage errors" {
+    run --separate-stderr "$DECAF" off extra
+    assert_status 2
+    assert_stderr "decaf: unexpected argument 'extra'"$'\n'"$usage_hint"
+    run --separate-stderr "$DECAF" off --now
+    assert_status 2
+    assert_stderr "decaf: unknown option '--now'"$'\n'"$usage_hint"
 }
 
 @test "off: systemctl stop failing is a system error" {
@@ -281,10 +357,6 @@ clock() {
     for ((i = ${#times[@]} - 2; i >= 0; i--)); do
         fake date --args "+%s" --stdout "${times[i]}" --once
     done
-}
-
-assert_notified() { # EXPIRE_MS URGENCY TITLE BODY
-    assert_called notify-send --app-name=decaf "--expire-time=$1" "--urgency=$2" "$3" "$4"
 }
 
 assert_notifications() { # COUNT

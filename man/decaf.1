@@ -4,8 +4,10 @@ decaf \- suspend the system after a while
 .SH SYNOPSIS
 .B decaf on
 .I DURATION
+.RB [ \-\-notify ]
 .br
 .B decaf off
+.RB [ \-\-notify ]
 .br
 .B decaf status
 .RB [ \-\-notify ]
@@ -37,9 +39,23 @@ seconds.
 .I DURATION
 is a whole number from 1 to 2147483647, without sign or leading zeros.
 Fails if a timer is already on.
+.RS
+.TP
+.B \-\-notify
+If a timer is already on, also show it as a desktop notification; see
+.BR NOTIFICATIONS .
+The exit status is the same.
+.RE
 .TP
 .B off
 Cancel the timer. Returns once it is fully cancelled.
+Fails if no timer is on.
+.RS
+.TP
+.B \-\-notify
+If no timer is on, also show that as a desktop notification.
+The exit status is the same.
+.RE
 .TP
 .B status
 Print the timer's state; see
@@ -131,6 +147,18 @@ There is none when the system suspends.
 shows the timer's state on request, for example from a keybinding: "Decaf on"
 with when it suspends and the time left ("Suspending at 15:40 (29m left)"), or
 "Decaf off" with "No timer is on".
+With
+.BR \-\-notify ,
+.B on
+and
+.B off
+also notify when there is nothing to do, since the timer unit then sends
+nothing: "Decaf already on" with the running timer, as
+.B status
+shows it, or "Decaf already off" with "No timer is on".
+Without it, a toggle such as
+.B "decaf off || decaf on 1800"
+shows only the timer unit's notification.
 Otherwise the commands send no notifications themselves, and
 .B on
 and
@@ -162,8 +190,8 @@ cancelled, or
 .B app-decaf.service
 exists but was not started by this version of
 .BR decaf ,
-or the notification of
-.B status \-\-notify
+or a notification asked for with
+.B \-\-notify
 could not be sent.
 .SH EXAMPLES
 Suspend in 45 minutes:
@@ -182,10 +210,13 @@ decaf off 2>/dev/null || decaf on 1800
 .fi
 .RE
 .PP
-Show the timer's state, for example from a keybinding:
+Separate keys to set and cancel a 30-minute timer, each with a notification
+even when there is nothing to do, and one to show the state:
 .PP
 .RS
 .nf
+decaf on 1800 \-\-notify
+decaf off \-\-notify
 decaf status \-\-notify >/dev/null
 .fi
 .RE

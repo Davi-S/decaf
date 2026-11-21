@@ -175,9 +175,11 @@ check "the unit is in app.slice" app.slice "$(unit_property Slice)"
 check "the unit counts exit 10 (skipped) as success" 10 "$(unit_property SuccessExitStatus)"
 check "on again is refused (exit 3)" 3 "$(code on 60)"
 check "status --notify: on (exit 0)" 0 "$(code status --notify)"
+check "on --notify: already on (exit 3)" 3 "$(code on 60 --notify)"
 check "off succeeds" 0 "$(code off)"
 check "off is synchronous: status is off right after" 1 "$(code status)"
 check "status --notify: off (exit 1)" 1 "$(code status --notify)"
+check "off --notify: already off (exit 1)" 1 "$(code off --notify)"
 check "off again: no timer (exit 1)" 1 "$(code off)"
 
 # -----------------------------------------------------------------------------
@@ -199,11 +201,13 @@ fi
 
 cat <<'EOF'
 
-  You should have seen four notifications, each for about 2 seconds:
-    Decaf on   Suspending at HH:MM
-    Decaf on   Suspending at HH:MM (9m left)   (status --notify)
-    Decaf off  Turned off
-    Decaf off  No timer is on                   (status --notify)
+  You should have seen six notifications, each for about 2 seconds:
+    Decaf on           Suspending at HH:MM
+    Decaf on           Suspending at HH:MM (9m left)   (status --notify)
+    Decaf already on   Suspending at HH:MM (9m left)   (on --notify)
+    Decaf off          Turned off
+    Decaf off          No timer is on                   (status --notify)
+    Decaf already off  No timer is on                   (off --notify)
 EOF
 
 # -----------------------------------------------------------------------------

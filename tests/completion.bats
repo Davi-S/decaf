@@ -32,15 +32,20 @@ complete_words() {
     assert_equal "$(complete_words "--h")" "--help"
 }
 
-@test "after status: --notify, once" {
-    assert_equal "$(complete_words status "")" "--notify"
-    assert_equal "$(complete_words status "--n")" "--notify"
-    assert_equal "$(complete_words status --notify "")" ""
+@test "after on, off and status: --notify, once" {
+    local cmd
+    for cmd in on off status; do
+        assert_equal "$(complete_words "$cmd" "")" "--notify"
+        assert_equal "$(complete_words "$cmd" "--n")" "--notify"
+        assert_equal "$(complete_words "$cmd" --notify "")" ""
+    done
+    assert_equal "$(complete_words on 1800 "")" "--notify"
+    assert_equal "$(complete_words on --notify 1800 "")" ""
 }
 
-@test "nothing to suggest after a command" {
+@test "nothing to suggest after the other commands, or for a duration" {
     local cmd
-    for cmd in on off --help --version; do
+    for cmd in --help --version; do
         assert_equal "$(complete_words "$cmd" "")" ""
     done
     assert_equal "$(complete_words on "18")" ""

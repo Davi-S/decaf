@@ -6,6 +6,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `on --notify` and `off --notify` also notify when there is nothing to do:
+  "Decaf already on" with the running timer (`Suspending at 15:40 (29m
+  left)`), or "Decaf already off" with `No timer is on`. The exit code is the
+  same. Without `--notify`, nothing changes, so a toggle such as
+  `decaf off || decaf on 1800` still shows only the timer's notification.
+
 ## [2.1.0] - 2026-11-21
 
 ### Added

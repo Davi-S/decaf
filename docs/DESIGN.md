@@ -18,8 +18,8 @@ This file records decisions. Open items are listed at the end.
 ## CLI
 
 ```
-decaf on DURATION
-decaf off
+decaf on DURATION [--notify]
+decaf off [--notify]
 decaf status [--notify]
 decaf --help
 decaf --version
@@ -27,10 +27,15 @@ decaf --version
 
 - **DURATION** is required: whole seconds, matching `^[1-9][0-9]*$`, at most
   `2147483647`. There is no `0`: to suspend now, use `systemctl suspend`.
-- **No config file**, no options besides `--help` and `--version`.
+- **No config file.** The only option is `--notify`, besides `--help` and
+  `--version`.
 - **stdout is data only; messages and errors go to stderr.**
 - **The CLI sends no notifications of its own.** The unit sends all of them,
-  except the one `status --notify` asks for.
+  except those `--notify` asks for: the state for `status`, and for `on` and
+  `off` the cases where there is nothing to do (already on, already off), in
+  which the unit sends nothing. It is opt-in so that a toggle
+  (`decaf off || decaf on 1800`) shows only the unit's notification.
+  The exit code is the same; a notification that fails is exit 4.
 - **`off` is synchronous:** when it returns, the timer is gone and `status` says off.
 - A usage error prints `decaf: <problem>` and
   `Try 'decaf --help' for more information.` to stderr, and exits 2.
@@ -142,7 +147,7 @@ three additions:
 
 ### Notifications
 
-Sent by the unit, and by `status --notify` on request, with `notify-send
+Sent by the unit, and by `--notify` on request, with `notify-send
 --app-name=decaf`, normal urgency except failures. Separate notifications, no
 replacing. Always English.
 
@@ -156,6 +161,8 @@ replacing. Always English.
 | Failed | Decaf failed | `Could not suspend. See: journalctl --user -u app-decaf` (critical) | 2 s |
 | `status --notify`, on | Decaf on | `Suspending at 23:00 (29m left)`. The time left is in its two largest units, rounded down (`2d 3h`, `1h 5m`, `29m`, `45s`). | 2 s |
 | `status --notify`, off | Decaf off | `No timer is on` | 2 s |
+| `on --notify`, already on | Decaf already on | The running timer, as for `status --notify` | 2 s |
+| `off --notify`, already off | Decaf already off | `No timer is on` | 2 s |
 
 ## Code structure and testing
 

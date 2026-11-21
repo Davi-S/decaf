@@ -333,20 +333,38 @@ sys_suspend() {
 
 # --- core --------------------------------------------------------------------
 
-# core_on DURATION
+# core_on DURATION NOTIFY
+# With NOTIFY true, a timer that is already on is also shown as a notification.
 core_on() {
-    local -r duration="$1"
+    local -r duration="$1" notify="$2"
     local state now
     state="$(sys_unit_state)" || return
-    [[ "$state" == inactive ]] || return "$EXIT_ALREADY_ON"
+    if [[ "$state" != inactive ]]; then
+        if [[ "$notify" == true ]]; then
+            local running_duration started
+            read -r _ running_duration started <<<"$state"
+            now="$(sys_now)" || return
+            sys_notify "$NOTIFY_MS" normal "Decaf already on" \
+                "$(describe_timer $((started + running_duration)) "$now")" || return
+        fi
+        return "$EXIT_ALREADY_ON"
+    fi
     now="$(sys_now)" || return
     sys_unit_start "$duration" "$now"
 }
 
+# core_off NOTIFY
+# With NOTIFY true, having no timer to cancel is also shown as a notification.
 core_off() {
+    local -r notify="$1"
     local state
     state="$(sys_unit_state)" || return
-    [[ "$state" != inactive ]] || return "$EXIT_NO_TIMER"
+    if [[ "$state" == inactive ]]; then
+        if [[ "$notify" == true ]]; then
+            sys_notify "$NOTIFY_MS" normal "Decaf already off" "No timer is on" || return
+        fi
+        return "$EXIT_NO_TIMER"
+    fi
     sys_unit_stop
 }
 
@@ -436,8 +454,8 @@ usage_error() {
 
 cli_help() {
     cat <<EOF
-Usage: decaf on DURATION
-       decaf off
+Usage: decaf on DURATION [--notify]
+       decaf off [--notify]
        decaf status [--notify]
        decaf --help | --version
 
@@ -447,7 +465,9 @@ Commands:
   on DURATION  Suspend in DURATION seconds (1 or more).
   off          Cancel the timer.
   status       Print the timer state as key=value lines.
-      --notify Also show the state as a desktop notification.
+
+  --notify     Also show a desktop notification when 'on' finds a timer
+               already on, when 'off' finds none, and for 'status'.
 
 Exit codes: 0 success or timer on, 1 no timer, 2 usage error,
             3 timer already on, 4 system error.
@@ -465,11 +485,15 @@ cli_no_args() {
 }
 
 # cli_parse_on ARG...
-# Validate the arguments of `on`. Prints DURATION.
+# Validate the arguments of `on`. Prints "DURATION NOTIFY".
 cli_parse_on() {
-    local duration="" arg
+    local duration="" notify=false arg
     for arg in "$@"; do
         case "$arg" in
+        --notify)
+            [[ "$notify" == false ]] || usage_error "option '--notify' given twice" || return
+            notify=true
+            ;;
         -*[!0-9]* | -)
             usage_error "unknown option '$arg'" || return
             ;;
@@ -484,13 +508,14 @@ cli_parse_on() {
         esac
     done
     [[ -n "$duration" ]] || usage_error "missing DURATION" || return
-    printf '%s\n' "$duration"
+    printf '%s %s\n' "$duration" "$notify"
 }
 
 cli_on() {
-    local duration
-    duration="$(cli_parse_on "$@")" || return
-    core_on "$duration" && return
+    local request duration notify
+    request="$(cli_parse_on "$@")" || return
+    read -r duration notify <<<"$request"
+    core_on "$duration" "$notify" && return
     local -r code=$?
     if ((code == EXIT_ALREADY_ON)); then
         err "a timer is already on; run 'decaf off' first"
@@ -499,8 +524,9 @@ cli_on() {
 }
 
 cli_off() {
-    cli_no_args off "$@" || return
-    core_off && return
+    local notify
+    notify="$(cli_parse_notify "$@")" || return
+    core_off "$notify" && return
     local -r code=$?
     if ((code == EXIT_NO_TIMER)); then
         err "no timer is on"
@@ -508,9 +534,10 @@ cli_off() {
     return "$code"
 }
 
-# cli_parse_status ARG...
-# Validate the arguments of `status`. Prints NOTIFY: `true` or `false`.
-cli_parse_status() {
+# cli_parse_notify ARG...
+# Validate the arguments of `off` and `status`, whose only option is --notify.
+# Prints NOTIFY.
+cli_parse_notify() {
     local notify=false arg
     for arg in "$@"; do
         case "$arg" in
@@ -527,7 +554,7 @@ cli_parse_status() {
 
 cli_status() {
     local notify
-    notify="$(cli_parse_status "$@")" || return
+    notify="$(cli_parse_notify "$@")" || return
     core_status "$notify"
 }
 
