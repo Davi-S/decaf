@@ -70,12 +70,15 @@ state=off
 ```
 
 `status --notify` prints the same, and also shows the state as a desktop
-notification: "Decaf on" with `Suspending at 15:40 (29m left)`, or "Decaf off"
-with `No timer is on`.
+notification: "Decaf status: on" with `Suspending at 15:40 (29m left)`, or
+"Decaf status: off" with `No timer is on`.
 
 `on --notify` and `off --notify` also notify when there is nothing to do:
-"Decaf already on" with the running timer, or "Decaf already off". When they
-do something, the timer's own notification is enough.
+"Decaf status: already on" with the running timer, or "Decaf status: already
+off". When they do something, the timer's own notification is enough.
+
+The "status:" in the title tells these apart from the notifications sent when
+a timer is really set or ends ("Decaf on", "Decaf off").
 
 ### Exit status
 

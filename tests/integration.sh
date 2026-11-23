@@ -202,12 +202,12 @@ fi
 cat <<'EOF'
 
   You should have seen six notifications, each for about 2 seconds:
-    Decaf on           Suspending at HH:MM
-    Decaf on           Suspending at HH:MM (9m left)   (status --notify)
-    Decaf already on   Suspending at HH:MM (9m left)   (on --notify)
-    Decaf off          Turned off
-    Decaf off          No timer is on                   (status --notify)
-    Decaf already off  No timer is on                   (off --notify)
+    Decaf on                    Suspending at HH:MM
+    Decaf status: on            Suspending at HH:MM (9m left)   (status --notify)
+    Decaf status: already on    Suspending at HH:MM (9m left)   (on --notify)
+    Decaf off                   Turned off
+    Decaf status: off           No timer is on                   (status --notify)
+    Decaf status: already off   No timer is on                   (off --notify)
 EOF
 
 # -----------------------------------------------------------------------------

@@ -149,7 +149,8 @@ three additions:
 
 Sent by the unit, and by `--notify` on request, with `notify-send
 --app-name=decaf`, normal urgency except failures. Separate notifications, no
-replacing. Always English.
+replacing. Always English. The `--notify` titles say "status:", so they are not
+mistaken for a timer that was really set or ended.
 
 | Event | Title | Body | Shown for |
 |---|---|---|---|
@@ -159,10 +160,10 @@ replacing. Always English.
 | Skipped | Decaf off | `Skipped: the system was asleep at 23:00` | 2 s |
 | Turned off | Decaf off | `Turned off` | 2 s |
 | Failed | Decaf failed | `Could not suspend. See: journalctl --user -u app-decaf` (critical) | 2 s |
-| `status --notify`, on | Decaf on | `Suspending at 23:00 (29m left)`. The time left is in its two largest units, rounded down (`2d 3h`, `1h 5m`, `29m`, `45s`). | 2 s |
-| `status --notify`, off | Decaf off | `No timer is on` | 2 s |
-| `on --notify`, already on | Decaf already on | The running timer, as for `status --notify` | 2 s |
-| `off --notify`, already off | Decaf already off | `No timer is on` | 2 s |
+| `status --notify`, on | Decaf status: on | `Suspending at 23:00 (29m left)`. The time left is in its two largest units, rounded down (`2d 3h`, `1h 5m`, `29m`, `45s`). | 2 s |
+| `status --notify`, off | Decaf status: off | `No timer is on` | 2 s |
+| `on --notify`, already on | Decaf status: already on | The running timer, as for `status --notify` | 2 s |
+| `off --notify`, already off | Decaf status: already off | `No timer is on` | 2 s |
 
 ## Code structure and testing
 

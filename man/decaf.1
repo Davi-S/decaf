@@ -144,18 +144,18 @@ soon"), when it is skipped or turned off ("Decaf off"), and when it fails
 There is none when the system suspends.
 .PP
 .B status \-\-notify
-shows the timer's state on request, for example from a keybinding: "Decaf on"
-with when it suspends and the time left ("Suspending at 15:40 (29m left)"), or
-"Decaf off" with "No timer is on".
+shows the timer's state on request, for example from a keybinding: "Decaf
+status: on" with when it suspends and the time left ("Suspending at 15:40 (29m
+left)"), or "Decaf status: off" with "No timer is on".
 With
 .BR \-\-notify ,
 .B on
 and
 .B off
 also notify when there is nothing to do, since the timer unit then sends
-nothing: "Decaf already on" with the running timer, as
+nothing: "Decaf status: already on" with the running timer, as
 .B status
-shows it, or "Decaf already off" with "No timer is on".
+shows it, or "Decaf status: already off" with "No timer is on".
 Without it, a toggle such as
 .B "decaf off || decaf on 1800"
 shows only the timer unit's notification.
@@ -164,6 +164,10 @@ Otherwise the commands send no notifications themselves, and
 and
 .B off
 print nothing on success.
+.PP
+The titles of the notifications asked for with
+.B \-\-notify
+say "status:", which tells them apart from the timer unit's own.
 .SH EXIT STATUS
 .TP
 .B 0

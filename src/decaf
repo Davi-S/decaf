@@ -344,7 +344,7 @@ core_on() {
             local running_duration started
             read -r _ running_duration started <<<"$state"
             now="$(sys_now)" || return
-            sys_notify "$NOTIFY_MS" normal "Decaf already on" \
+            sys_notify "$NOTIFY_MS" normal "Decaf status: already on" \
                 "$(describe_timer $((started + running_duration)) "$now")" || return
         fi
         return "$EXIT_ALREADY_ON"
@@ -361,7 +361,7 @@ core_off() {
     state="$(sys_unit_state)" || return
     if [[ "$state" == inactive ]]; then
         if [[ "$notify" == true ]]; then
-            sys_notify "$NOTIFY_MS" normal "Decaf already off" "No timer is on" || return
+            sys_notify "$NOTIFY_MS" normal "Decaf status: already off" "No timer is on" || return
         fi
         return "$EXIT_NO_TIMER"
     fi
@@ -378,7 +378,7 @@ core_status() {
     if [[ "$state" == inactive ]]; then
         printf 'state=off\n'
         if [[ "$notify" == true ]]; then
-            sys_notify "$NOTIFY_MS" normal "Decaf off" "No timer is on" || return
+            sys_notify "$NOTIFY_MS" normal "Decaf status: off" "No timer is on" || return
         fi
         return "$EXIT_NO_TIMER"
     fi
@@ -387,7 +387,7 @@ core_status() {
     now="$(sys_now)" || return
     format_status "$duration" "$started" "$now"
     if [[ "$notify" == true ]]; then
-        sys_notify "$NOTIFY_MS" normal "Decaf on" \
+        sys_notify "$NOTIFY_MS" normal "Decaf status: on" \
             "$(describe_timer $((started + duration)) "$now")" || return
     fi
 }

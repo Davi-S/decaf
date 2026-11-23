@@ -127,7 +127,7 @@ assert_timer_started() {
     assert_status 1
     assert_output "state=off"
     assert_stderr ""
-    assert_notified 2000 normal "Decaf off" "No timer is on"
+    assert_notified 2000 normal "Decaf status: off" "No timer is on"
 }
 
 @test "status --notify: a running timer" {
@@ -138,7 +138,7 @@ assert_timer_started() {
     assert_output "$(printf '%s\n' state=on duration=1800 started=1759158600 \
         until=1759160400 remaining=1740)"
     assert_stderr ""
-    assert_notified 2000 normal "Decaf on" "Suspending at 15:40 (29m left)"
+    assert_notified 2000 normal "Decaf status: on" "Suspending at 15:40 (29m left)"
 }
 
 @test "status --notify: a failed notification is a system error, after the output" {
@@ -269,7 +269,7 @@ assert_timer_started() {
     assert_status 3
     assert_output ""
     assert_stderr "decaf: a timer is already on; run 'decaf off' first"
-    assert_notified 2000 normal "Decaf already on" "Suspending at 15:40 (29m left)"
+    assert_notified 2000 normal "Decaf status: already on" "Suspending at 15:40 (29m left)"
     refute_called systemd-run
 }
 
@@ -308,7 +308,7 @@ assert_timer_started() {
     assert_status 1
     assert_output ""
     assert_stderr "decaf: no timer is on"
-    assert_notified 2000 normal "Decaf already off" "No timer is on"
+    assert_notified 2000 normal "Decaf status: already off" "No timer is on"
 }
 
 @test "off --notify: a failed notification is a system error" {
