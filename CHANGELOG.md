@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-11-23
+
 ### Changed
 
 - The notifications shown by `--notify` say "status:" in the title, so they
