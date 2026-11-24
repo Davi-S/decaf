@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-24
+
 ### Added
 
 - A `decaf` group, and a polkit rule that lets its members suspend past sleep
