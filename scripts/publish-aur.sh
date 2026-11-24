@@ -36,6 +36,7 @@ done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template="$repo_root/packaging/aur/PKGBUILD"
+install_script="$repo_root/packaging/aur/decaf.install"
 workdir="${AUR_WORKDIR:-$(mktemp -d)}"
 
 echo ":: Cloning AUR repo into $workdir"
@@ -43,6 +44,7 @@ git clone --quiet "$AUR_REMOTE" "$workdir"
 cd "$workdir"
 
 cp "$template" PKGBUILD
+cp "$install_script" decaf.install
 sed -i -e "s/^pkgver=.*/pkgver=$version/" -e "s/^pkgrel=.*/pkgrel=$pkgrel/" PKGBUILD
 
 echo ":: Updating checksums"
@@ -54,7 +56,7 @@ rm -rf src pkg ./*.pkg.tar.*
 
 makepkg --printsrcinfo >.SRCINFO
 
-git add PKGBUILD .SRCINFO
+git add PKGBUILD decaf.install .SRCINFO
 if git diff --cached --quiet; then
     echo ":: Nothing changed; AUR already up to date."
     exit 0

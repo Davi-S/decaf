@@ -12,9 +12,11 @@ keeps the system awake for a while.
 - **Exact.** It fires at its wall-clock deadline, even across a suspend.
   If the system was already asleep at the deadline, it skips instead of
   suspending again as soon as you resume.
-- **Firm.** It suspends even if other programs hold locks against it (a
-  download, expresso). Overriding such a lock asks for your password; without
-  one there is no prompt.
+- **Firm, but safe.** It suspends even if your own programs hold locks against
+  it (a download, expresso, a media server). It never overrides the locks of
+  the system or of other users (a firmware update, a system upgrade): it tells
+  you instead. Overriding your own locks asks for your password, unless you
+  join the `decaf` group (see [Permissions](#permissions)).
 - **Warns you.** "Suspending soon" appears a minute before, so you can cancel.
   On request, e.g. from a keybinding, `--notify` shows the timer's state, or
   that there was nothing to do.
@@ -31,8 +33,8 @@ paru -S decaf
 
 ### From source
 
-Dependencies: `bash`, `systemd`, `glib2` (for `gdbus`), `libnotify`, and `make`
-to install.
+Dependencies: `bash`, `systemd`, `glib2` (for `gdbus`), `libnotify`, `polkit`,
+and `make` to install.
 
 ```bash
 git clone https://github.com/Davi-S/decaf.git
@@ -40,6 +42,26 @@ cd decaf
 sudo make install              # installs to /usr/local; use PREFIX=/usr to change
 sudo make uninstall            # to remove
 ```
+
+`make install` also installs a polkit rule and creates the `decaf` group; see
+[Permissions](#permissions).
+
+### Permissions
+
+When your own programs hold locks against sleep, suspending past them needs
+your password: a prompt appears at the deadline, and if nobody answers within
+25 seconds the system stays awake. To let a timer suspend while you are away,
+join the `decaf` group:
+
+```bash
+sudo usermod -aG decaf "$USER"
+```
+
+The polkit rule shipped with decaf lets the group's members suspend past sleep
+locks without a password, from an active local session. polkit can't tell
+which program asks, so this applies to every program you run, not only decaf.
+decaf itself still never suspends past the locks of the system or of other
+users.
 
 ## Usage
 

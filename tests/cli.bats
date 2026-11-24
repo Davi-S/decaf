@@ -5,6 +5,7 @@
 setup() {
     load helpers
     common_setup
+    fake_locks # none, unless a test says otherwise
 }
 
 usage_hint="Try 'decaf --help' for more information."
@@ -359,6 +360,17 @@ clock() {
     done
 }
 
+# fake_locks LOCK...: logind's inhibitor locks, each written as busctl prints
+# one: "WHAT" "WHO" "WHY" "MODE" UID PID.
+fake_locks() {
+    local IFS=' '
+    fake busctl --args "--system call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager ListInhibitors" \
+        --stdout "a(ssssuu) $#${*:+ $*}"
+}
+
+# A user other than the one running the tests.
+readonly OTHER_UID=$((UID == 0 ? 1000 : 0))
+
 assert_notifications() { # COUNT
     assert_equal "$(calls notify-send | wc -l)" "$1"
 }
@@ -377,7 +389,7 @@ assert_notifications() { # COUNT
     assert_notified 2000 normal "Decaf on" "Suspending at 15:40"
     assert_notified 6000 normal "Suspending soon" "At 15:40 - run 'decaf off' to cancel"
     assert_notifications 2
-    assert_called systemctl suspend -i
+    assert_called systemctl suspend
     assert_called gdbus "${MONITOR_ARGS[@]}"
     refute_called sleep
     refute_hanging gdbus
@@ -393,7 +405,7 @@ assert_notifications() { # COUNT
     assert_status 0
     ((SECONDS <= 2)) || fail "took $SECONDS s: it waited instead of rechecking"
     assert_notified 6000 normal "Suspending soon" "At 15:40 - run 'decaf off' to cancel"
-    assert_called systemctl suspend -i
+    assert_called systemctl suspend
     refute_hanging gdbus
 }
 
@@ -407,6 +419,7 @@ assert_notifications() { # COUNT
     assert_stderr ""
     assert_notifications 1 # only "Decaf on"
     refute_called systemctl
+    refute_called busctl
     refute_hanging gdbus
 }
 
@@ -415,7 +428,7 @@ assert_notifications() { # COUNT
     clock "$S" $((S + 35))
     run "$DECAF" _wait
     assert_status 0
-    assert_called systemctl suspend -i
+    assert_called systemctl suspend
 
     : >"$FAKE_DIR/calls.log"
     clock "$S" $((S + 36))
@@ -444,7 +457,7 @@ assert_notifications() { # COUNT
     assert_status 0
     assert_stderr "decaf: cannot watch logind for resume; after a suspend, the timer may end late"
     assert_called sleep 30
-    assert_called systemctl suspend -i
+    assert_called systemctl suspend
 }
 
 @test "_wait: a failed notification does not cancel the timer" {
@@ -454,7 +467,7 @@ assert_notifications() { # COUNT
     run --separate-stderr "$DECAF" _wait
     assert_status 0
     assert_stderr "decaf: could not send a notification"
-    assert_called systemctl suspend -i
+    assert_called systemctl suspend
 }
 
 @test "_wait: an unreadable clock while waiting never suspends" {
@@ -470,11 +483,126 @@ assert_notifications() { # COUNT
 
 @test "_wait: a refused suspend is a system error" {
     timer_env 30 "$S"
-    fake systemctl --args "suspend -i" --exit 1
+    fake systemctl --args "suspend" --exit 1
     clock "$S" $((S + 30))
     run --separate-stderr "$DECAF" _wait
     assert_status 4
     assert_stderr "decaf: could not suspend"
+}
+
+# --- _wait: sleep locks at the deadline ---------------------------------------
+# Each test reaches the deadline at once: a 30 s timer (no warning), and the
+# clock already at the deadline on the second read.
+
+@test "_wait: no lock blocks: a plain suspend, which overrides nothing" {
+    timer_env 30 "$S"
+    fake_locks '"sleep" "UPower" "Pause device polling" "delay" 0 1324' \
+        '"idle" "mpv" "Playing" "block" 0 9'
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 0
+    assert_stderr ""
+    assert_called busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
+        org.freedesktop.login1.Manager ListInhibitors
+    assert_called systemctl suspend
+    refute_called "systemctl suspend -i"
+}
+
+@test "_wait: the user's own block lock is overridden" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"Jellyfin\" \"Serving media\" \"block\" $UID 42"
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 0
+    assert_stderr ""
+    assert_called systemctl suspend -i
+    assert_notifications 1 # only "Decaf on"
+}
+
+@test "_wait: the user's own block-weak lock needs no override" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"Jellyfin\" \"Serving media\" \"block-weak\" $UID 42"
+    clock "$S" $((S + 30))
+    run "$DECAF" _wait
+    assert_status 0
+    assert_called systemctl suspend
+    refute_called "systemctl suspend -i"
+}
+
+@test "_wait: a lock of the system or another user blocks: no suspend" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"Jellyfin\" \"Serving media\" \"block\" $UID 42" \
+        "\"shutdown:sleep\" \"fwupd\" \"Updating firmware\" \"block\" $OTHER_UID 7"
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 11
+    assert_stderr "decaf: not suspending: a sleep lock of the system or of another user blocks it (see 'systemd-inhibit --list')"
+    refute_called systemctl
+    assert_notified 2000 critical "Decaf blocked" "Not suspending: blocked by fwupd (Updating firmware)"
+}
+
+@test "_wait: another user's block-weak lock blocks too" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"Steam\" \"\" \"block-weak\" $OTHER_UID 7"
+    clock "$S" $((S + 30))
+    run "$DECAF" _wait
+    assert_status 11
+    refute_called systemctl
+    assert_notified 2000 critical "Decaf blocked" "Not suspending: blocked by Steam"
+}
+
+@test "_wait: blocked by several locks: names the first, counts the rest" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"A&B <x>\" \"It\\'s\" \"block\" $OTHER_UID 7" \
+        "\"sleep\" \"other\" \"\" \"block\" $OTHER_UID 8" \
+        "\"sleep\" \"third\" \"\" \"block\" $OTHER_UID 9"
+    clock "$S" $((S + 30))
+    run "$DECAF" _wait
+    assert_status 11
+    assert_notified 2000 critical "Decaf blocked" "Not suspending: blocked by A&amp;B &lt;x&gt; (It's) and 2 more"
+}
+
+@test "_wait: a failed notification still leaves the timer blocked" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"fwupd\" \"\" \"block\" $OTHER_UID 7"
+    fake notify-send --exit 1
+    clock "$S" $((S + 30))
+    run "$DECAF" _wait
+    assert_status 11
+    refute_called systemctl
+}
+
+@test "_wait: an override refused (no password) names the locks" {
+    timer_env 30 "$S"
+    fake_locks "\"sleep\" \"Jellyfin\" \"Serving media\" \"block\" $UID 42" \
+        "\"sleep\" \"expresso\" \"expresso on\" \"block\" $UID 43"
+    fake systemctl --args "suspend -i" --exit 1
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 4
+    assert_stderr "decaf: could not suspend past your own sleep locks: Jellyfin (Serving media), expresso (expresso on)
+decaf: that needs your password, unless you are in the 'decaf' group: see 'man decaf'"
+}
+
+@test "_wait: unreadable locks: suspends without overriding any" {
+    timer_env 30 "$S"
+    fake busctl --exit 1
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 0
+    assert_stderr "decaf: could not read the sleep locks from logind; overriding none"
+    assert_called systemctl suspend
+    refute_called "systemctl suspend -i"
+}
+
+@test "_wait: unexpected lock output: suspends without overriding any" {
+    timer_env 30 "$S"
+    fake busctl --stdout "something else"
+    clock "$S" $((S + 30))
+    run --separate-stderr "$DECAF" _wait
+    assert_status 0
+    assert_stderr "decaf: could not read the sleep locks from logind (unexpected output); overriding none"
+    assert_called systemctl suspend
 }
 
 @test "_wait: missing or invalid timer values are a system error" {
@@ -494,6 +622,13 @@ assert_notifications() { # COUNT
 @test "_stopped: suspended: no notification" {
     timer_env 1800 "$S"
     EXIT_CODE=exited EXIT_STATUS=0 run "$DECAF" _stopped
+    assert_status 0
+    refute_called notify-send
+}
+
+@test "_stopped: blocked: no notification (_wait sent it)" {
+    timer_env 1800 "$S"
+    EXIT_CODE=exited EXIT_STATUS=11 run "$DECAF" _stopped
     assert_status 0
     refute_called notify-send
 }

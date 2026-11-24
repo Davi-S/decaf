@@ -1,4 +1,4 @@
-.TH DECAF 1 "2026-11-21" "decaf" "User Commands"
+.TH DECAF 1 "2026-11-23" "decaf" "User Commands"
 .SH NAME
 decaf \- suspend the system after a while
 .SH SYNOPSIS
@@ -16,7 +16,7 @@ decaf \- suspend the system after a while
 .BR \-\-help " | " \-\-version
 .SH DESCRIPTION
 .B decaf
-suspends the system after a given number of seconds, even if other programs
+suspends the system after a given number of seconds, even if your own programs
 try to keep it awake.
 It is meant to be scripted: output on stdout is data only, messages go to
 stderr, and every outcome has its own exit status.
@@ -127,20 +127,90 @@ resumed later), the timer is skipped: it ends when the system resumes, without
 suspending it again.
 Suspending and resuming before the deadline keeps the timer.
 .PP
-At the deadline the system suspends even if other programs hold locks against
-it, such as a download or
-.BR expresso (1).
-Overriding such a blocking lock needs your password (polkit's
-.BR suspend-ignore-inhibit );
-a prompt appears at the deadline.
+.SH SLEEP LOCKS
+Programs can hold inhibitor locks against sleep; see
+.BR systemd-inhibit (1).
+.B systemd-inhibit \-\-list
+shows them.
+At the deadline,
+.BR decaf :
+.IP \(bu 2
+suspends past blocking locks held by your own user, such as a download,
+.BR expresso (1),
+or a script that runs
+.BR systemd-inhibit ;
+see
+.BR PERMISSIONS ;
+.IP \(bu 2
+never suspends past a blocking lock held by the system or by another user,
+such as a firmware update or a system upgrade.
+It does not suspend: it shows "Decaf blocked" with the lock's program and
+reason, and the timer ends.
+.PP
+Locks in
+.B delay
+mode never stop a suspend.
+A lock in
+.B block\-weak
+mode (systemd 257 or later) blocks every user but its owner, so
+.B decaf
+suspends past your own with no override and no password.
+.PP
+If
+.B decaf
+cannot read the locks, it suspends without overriding any: then any blocking
+lock stops it, and the timer ends as failed.
+.SH PERMISSIONS
+A suspend that no lock blocks needs no password.
+Suspending past your own blocking locks is polkit's
+.B org.freedesktop.login1.suspend\-ignore\-inhibit
+action, which by default asks for an administrator password: a prompt appears
+at the deadline.
 If nobody answers it within 25 seconds, the system does not suspend and the
 timer ends as failed.
-Without blocking locks there is no prompt.
+.PP
+To suspend past them without a password, so that a timer works while nobody is
+there, join the
+.B decaf
+group:
+.PP
+.RS
+.nf
+sudo usermod \-aG decaf "$USER"
+.fi
+.RE
+.PP
+The polkit rule installed with
+.B decaf
+lets members of the group take that action without a password, from an active
+local session.
+polkit cannot tell which program asks, so membership lets every program you run
+suspend past any sleep lock, not only
+.BR decaf ;
+.B decaf
+itself still never suspends past the locks of the system or of other users.
+To check that the rule applies to you (exit status 0):
+.PP
+.RS
+.nf
+pkcheck \-\-action\-id org.freedesktop.login1.suspend\-ignore\-inhibit \e
+    \-\-process $$
+.fi
+.RE
+.PP
+Alternatively, have your own programs take
+.B block\-weak
+locks
+.RB ( "systemd\-inhibit \-\-mode=block\-weak" ),
+which need no override at all.
+But then they stop nothing you run, not even your idle manager's suspend.
 .SH NOTIFICATIONS
 The timer unit itself sends desktop notifications, whatever started or stopped
 it: when the timer is set ("Decaf on"), shortly before the suspend ("Suspending
-soon"), when it is skipped or turned off ("Decaf off"), and when it fails
-("Decaf failed", with where to look in the journal).
+soon"), when it is skipped or turned off ("Decaf off"), when a lock of the
+system or another user blocks the suspend ("Decaf blocked", with the lock; see
+.BR "SLEEP LOCKS" ),
+and when it fails ("Decaf failed", with where to look in the journal).
 There is none when the system suspends.
 .PP
 .B status \-\-notify
@@ -235,13 +305,29 @@ fi
 .fi
 .RE
 .SH FILES
-None. There is no configuration file; put your preferred durations in a
-keybinding, alias or script.
+There is no configuration file; put your preferred durations in a keybinding,
+alias or script.
+.TP
+.I /usr/share/polkit\-1/rules.d/50\-decaf.rules
+The polkit rule for the
+.B decaf
+group; see
+.BR PERMISSIONS .
+.TP
+.I /usr/lib/sysusers.d/decaf.conf
+Creates the
+.B decaf
+group.
+.PP
+Installed from source, both are under the install prefix, by default
+.IR /usr/local .
 .SH SEE ALSO
 .BR expresso (1),
 .BR systemctl (1),
 .BR systemd-run (1),
 .BR systemd-inhibit (1),
-.BR notify-send (1)
+.BR notify-send (1),
+.BR polkit (8),
+.BR pkcheck (1)
 .SH BUGS
 Report issues at https://github.com/Davi-S/decaf/issues

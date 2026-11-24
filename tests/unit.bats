@@ -270,10 +270,103 @@ usage_hint="Try 'decaf --help' for more information."
 @test "stop_reason maps the waiter's exit information to how the timer ended" {
     assert_equal "$(stop_reason exited 0)" "suspended"
     assert_equal "$(stop_reason exited 10)" "skipped"
+    assert_equal "$(stop_reason exited 11)" "blocked"
     assert_equal "$(stop_reason killed TERM)" "stopped"
     assert_equal "$(stop_reason killed KILL)" "stopped"
     assert_equal "$(stop_reason exited 1)" "failed"
     assert_equal "$(stop_reason exited 4)" "failed"
     assert_equal "$(stop_reason dumped SEGV)" "failed"
     assert_equal "$(stop_reason "" "")" "failed"
+}
+
+# --- sleep locks -------------------------------------------------------------
+
+# sep FIELD...: the fields joined by LOCK_SEP, as parse_inhibitors prints them.
+sep() {
+    local IFS="$LOCK_SEP"
+    printf '%s\n' "$*"
+}
+
+@test "parse_inhibitors: busctl's output, one lock per line" {
+    # Real output, with an escaped quote in a reason.
+    # shellcheck disable=SC1003 # \' is busctl's escape, part of the data
+    local -r text='a(ssssuu) 3 "sleep" "expresso" "expresso on" "block" 1000 529956 "sleep" "hypridle" "Hypridle wants to delay sleep until it\'"'"'s before_sleep handling is done." "delay" 1000 1269 "shutdown:sleep" "UPower" "" "delay" 0 1324'
+    run parse_inhibitors "$text"
+    assert_status 0
+    assert_equal "${#lines[@]}" 3
+    assert_equal "${lines[0]}" "$(sep sleep expresso "expresso on" block 1000)"
+    assert_equal "${lines[1]}" "$(sep sleep hypridle "Hypridle wants to delay sleep until it\\'s before_sleep handling is done." delay 1000)"
+    assert_equal "${lines[2]}" "$(sep shutdown:sleep UPower "" delay 0)"
+}
+
+@test "parse_inhibitors: no locks" {
+    run parse_inhibitors 'a(ssssuu) 0'
+    assert_status 0
+    assert_output ""
+}
+
+@test "parse_inhibitors: escaped quotes and backslashes stay escaped" {
+    # shellcheck disable=SC1003 # \' is busctl's escape, part of the data
+    run parse_inhibitors 'a(ssssuu) 1 "sleep" "It\'"'"'s \"q\" \\" "Reprodu\303\247\303\243o" "block-weak" 1000 7'
+    assert_status 0
+    assert_output "$(sep sleep "It\\'s \\\"q\\\" \\\\" 'Reprodu\303\247\303\243o' block-weak 1000)"
+}
+
+@test "parse_inhibitors: rejects anything else" {
+    local text
+    for text in "" "a(ssssuu)" "a(ssss) 0" "a(ssssuu) 1" \
+        'a(ssssuu) 2 "sleep" "a" "b" "block" 1000 1' \
+        'a(ssssuu) 1 "sleep" "a" "b" "block" 1000 1 "extra"' \
+        'a(ssssuu) 1 "sleep" "a" "b" "block" 1000' \
+        'a(ssssuu) 1 "sleep" "a" "b" "block" -1 1' \
+        'a(ssssuu) 1 "sleep" "a" "b" "block" 01 1' \
+        'a(ssssuu) 1 "sleep" "a" "b" "block" 99999999999 1' \
+        'a(ssssuu) 1 "sleep" "a" "b "block" 1000 1' \
+        'a(ssssuu) 1 "sleep" "a\" "b" "block" 1000 1' \
+        "a(ssssuu) 1 \"sleep\" \"a${LOCK_SEP}b\" \"b\" \"block\" 1000 1" \
+        $'a(ssssuu) 1 "sleep" "a\tb" "b" "block" 1000 1' \
+        'a(ssssuu) 1 sleep "a" "b" "block" 1000 1'; do
+        if parse_inhibitors "$text" >/dev/null; then
+            fail "accepted: $text"
+        fi
+    done
+}
+
+@test "sleep_blockers: block locks block everyone, their owner too" {
+    local -r locks="$(sep sleep jf "Serving media" block 1000)"$'\n'"$(sep sleep fwupd "Updating" block 0)"
+    assert_equal "$(sleep_blockers "$locks" 1000)" "$(sep 1000 jf "Serving media")"$'\n'"$(sep 0 fwupd Updating)"
+}
+
+@test "sleep_blockers: block-weak locks block everyone but their owner" {
+    local -r locks="$(sep sleep jf "Serving media" block-weak 1000)"
+    assert_equal "$(sleep_blockers "$locks" 1000)" ""
+    assert_equal "$(sleep_blockers "$locks" 1001)" "$(sep 1000 jf "Serving media")"
+}
+
+@test "sleep_blockers: only locks on sleep count; delay locks never block" {
+    local -r locks="$(sep sleep UPower "Pause polling" delay 0)"$'\n'"$(sep idle mpv "Playing" block 1000)"$'\n'"$(sep shutdown:sleep:idle app "" block 1000)"$'\n'"$(sep handle-lid-switch dm "" block 0)"
+    assert_equal "$(sleep_blockers "$locks" 1000)" "$(sep 1000 app "")"
+}
+
+@test "sleep_blockers: no locks" {
+    assert_equal "$(sleep_blockers "" 1000)" ""
+}
+
+@test "describe_lock: who and why, unescaped" {
+    assert_equal "$(describe_lock jf "Serving media")" "jf (Serving media)"
+    assert_equal "$(describe_lock "It\\'s \\\"q\\\" \\\\" 'Reprodu\303\247\303\243o')" "It's \"q\" \\ (Reprodução)"
+    assert_equal "$(describe_lock '50\\n' "")" '50\n'
+}
+
+@test "describe_lock: just who without a reason" {
+    assert_equal "$(describe_lock fwupd "")" "fwupd"
+}
+
+@test "describe_blocked: the first lock, and how many more" {
+    assert_equal "$(describe_blocked "fwupd (Updating)")" "Not suspending: blocked by fwupd (Updating)"
+    assert_equal "$(describe_blocked "fwupd (Updating)" a b)" "Not suspending: blocked by fwupd (Updating) and 2 more"
+}
+
+@test "describe_blocked: markup is escaped" {
+    assert_equal "$(describe_blocked "<b>A&B</b>")" "Not suspending: blocked by &lt;b&gt;A&amp;B&lt;/b&gt;"
 }

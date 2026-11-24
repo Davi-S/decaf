@@ -10,7 +10,8 @@
 #                    timer is turned off long before its deadline.
 #   --suspend:       then three checks that suspend the machine, each started
 #                    only after you press Enter:
-#                      1. decaf suspends at the deadline, overriding a sleep lock
+#                      1. decaf suspends at the deadline, overriding your own
+#                         sleep lock
 #                      2. asleep at the deadline: the timer is skipped on resume
 #                      3. resuming inside the last minute: the warning appears
 #
@@ -102,6 +103,38 @@ now_ms() {
     printf '%s\n' "$((us / 1000))"
 }
 
+# can_suspend: logind's answer to CanSuspend for this user: yes, challenge, ...
+can_suspend() {
+    busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
+        org.freedesktop.login1.Manager CanSuspend | sed -n 's/^s "\(.*\)"$/\1/p'
+}
+
+# hold_lock MODE: hold a test sleep lock in MODE until release_lock.
+hold_lock() {
+    systemd-inhibit --what=sleep --who=decaf-integration --why="it's \"a test\"" \
+        --mode="$1" sleep 600 &
+    inhibit_pid=$!
+    sleep 0.5
+}
+
+release_lock() {
+    kill "$inhibit_pid" 2>/dev/null || true
+    wait "$inhibit_pid" 2>/dev/null || true
+    inhibit_pid=""
+}
+
+# own_blockers: decaf's description of each of your own locks that block sleep,
+# read from logind as the timer does at the deadline.
+own_blockers() {
+    # shellcheck disable=SC2016 # expanded by the inner bash
+    bash -c '
+        source "$1"
+        locks="$(sys_inhibitors)" || exit 1
+        while IFS="$LOCK_SEP" read -r owner who why; do
+            [[ "$owner" != "$UID" ]] || describe_lock "$who" "$why"
+        done < <(sleep_blockers "$locks" "$UID")' _ "$DECAF"
+}
+
 # at SECONDS: a Unix time as HH:MM:SS.
 at() {
     printf '%(%H:%M:%S)T\n' "$1"
@@ -190,6 +223,39 @@ check "on 10m is a usage error (exit 2)" 2 "$(code on 10m)"
 check "and start nothing" 1 "$(code status)"
 
 # -----------------------------------------------------------------------------
+section "Sleep locks (never suspends)"
+
+hold_lock block
+blockers="$(own_blockers)" || blockers="(could not read the locks)"
+check "decaf reads your block lock from logind, unescaped" yes \
+    "$(grep -qxF "decaf-integration (it's \"a test\")" <<<"$blockers" && echo yes || echo "no: $blockers")"
+release_lock
+hold_lock block-weak
+blockers="$(own_blockers)" || blockers="(could not read the locks)"
+check "your own block-weak lock does not count as blocking you" "" \
+    "$(grep -xF "decaf-integration (it's \"a test\")" <<<"$blockers" || true)"
+release_lock
+
+# What decaf relies on to skip the override: logind ignores a block-weak lock
+# for its owner. Only checkable when nothing else blocks suspend already.
+baseline="$(can_suspend)"
+if [[ "$baseline" == yes ]]; then
+    hold_lock block-weak
+    check "logind ignores your own block-weak lock (CanSuspend)" yes "$(can_suspend)"
+    release_lock
+    hold_lock block
+    answer="$(can_suspend)"
+    release_lock
+    if [[ "$answer" != yes ]]; then
+        pass "logind enforces your own block lock (CanSuspend: $answer)"
+    else
+        fail "logind enforces your own block lock: CanSuspend says yes"
+    fi
+else
+    printf '  skip  CanSuspend checks: suspend is already %s (see systemd-inhibit --list)\n' "$baseline"
+fi
+
+# -----------------------------------------------------------------------------
 section "Journal"
 
 if journal="$(journalctl --user -u app-decaf.service --since "@$test_start" -o cat 2>/dev/null)"; then
@@ -214,22 +280,20 @@ EOF
 if [[ "$suspend_checks" == true ]]; then
     section "Suspend check 1: decaf suspends at the deadline, overriding a sleep lock"
     cat <<'EOF'
-  A 20-second timer starts while another program holds a lock that blocks
-  suspend (like expresso would). Suspending past it needs your password: a
-  prompt appears at the deadline; type it within 25 s. decaf must then
-  suspend. When the machine is asleep, wake it (open the lid or press a key).
+  A 20-second timer starts while one of your programs holds a lock that
+  blocks suspend (like expresso would). Suspending past it needs your
+  password, unless you are in the 'decaf' group: then no prompt appears.
+  Otherwise a prompt appears at the deadline; type it within 25 s. decaf must
+  then suspend. When the machine is asleep, wake it (open the lid or press a
+  key).
 EOF
     read -rp "  Press Enter to start... "
-    systemd-inhibit --what=sleep --who=decaf-integration --why="decaf must override this" \
-        --mode=block sleep 600 &
-    inhibit_pid=$!
-    sleep 0.5
+    hold_lock block
     check "on succeeds" 0 "$(code on 20)"
     until="$(field until)"
     printf '  The machine suspends at %s.\n' "$(at "$until")"
     observe 15 600
-    kill "$inhibit_pid" 2>/dev/null || true
-    inhibit_pid=""
+    release_lock
     check "the machine suspended once" 1 "${#gap_starts[@]}"
     if ((${#gap_starts[@]} >= 1)); then
         # Includes typing the password (the prompt allows 25 s).

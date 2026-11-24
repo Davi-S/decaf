@@ -40,6 +40,15 @@ readonly UNIT="app-decaf.service"
 # a success (SuccessExitStatus), and `_stopped` reads it.
 readonly WAIT_SKIPPED=10
 
+# `_wait` exits with this code when a sleep lock of the system or of another
+# user blocks the suspend. It has already notified; `_stopped` reads it.
+readonly WAIT_BLOCKED=11
+
+# Separates the fields of a lock in parse_inhibitors' output. A control
+# character, which busctl always escapes, so no field contains it; and not
+# whitespace, so `read` keeps empty fields.
+readonly LOCK_SEP=$'\x1f'
+
 # Noticing the deadline more than this many seconds late means the system was
 # asleep at the deadline: skip. Awake, the waiter notices within milliseconds.
 readonly SKIP_AFTER=5
@@ -192,9 +201,99 @@ stop_reason() {
     case "$1:$2" in
     exited:0) printf 'suspended\n' ;;
     "exited:$WAIT_SKIPPED") printf 'skipped\n' ;;
+    "exited:$WAIT_BLOCKED") printf 'blocked\n' ;;
     killed:*) printf 'stopped\n' ;;
     *) printf 'failed\n' ;;
     esac
+}
+
+# parse_inhibitors TEXT
+# Parse the output of busctl's ListInhibitors call: "a(ssssuu) COUNT", then
+# COUNT locks of six fields: WHAT WHO WHY MODE UID PID. Prints one lock per
+# line, its fields separated by LOCK_SEP: WHAT, WHO, WHY, MODE, UID. WHO and WHY
+# stay C-escaped as busctl prints them; describe_lock shows them. Fails on
+# anything else.
+parse_inhibitors() {
+    local -r header='^a\(ssssuu\) (0|[1-9][0-9]{0,5})'
+    # A string field: quoted, C-escaped; never a raw control character.
+    local -r string='^ "(([^"\\[:cntrl:]]|\\[^[:cntrl:]])*)"'
+    local -r number='^ (0|[1-9][0-9]{0,9})'
+    local rest="$1"
+    [[ "$rest" =~ $header ]] || return 1
+    local -r count="${BASH_REMATCH[1]}"
+    rest="${rest:${#BASH_REMATCH[0]}}"
+
+    local -i i field
+    local -a fields
+    for ((i = 0; i < count; i++)); do
+        fields=()
+        for ((field = 0; field < 4; field++)); do
+            [[ "$rest" =~ $string ]] || return 1
+            fields+=("${BASH_REMATCH[1]}")
+            rest="${rest:${#BASH_REMATCH[0]}}"
+        done
+        for ((field = 0; field < 2; field++)); do
+            [[ "$rest" =~ $number ]] || return 1
+            fields+=("${BASH_REMATCH[1]}")
+            rest="${rest:${#BASH_REMATCH[0]}}"
+        done
+        printf '%s\n' "${fields[0]}$LOCK_SEP${fields[1]}$LOCK_SEP${fields[2]}$LOCK_SEP${fields[3]}$LOCK_SEP${fields[4]}"
+    done
+    [[ -z "$rest" ]]
+}
+
+# sleep_blockers LOCKS UID
+# From parse_inhibitors' output, print the locks that block a suspend requested
+# by user UID: OWNER_UID, WHO and WHY, separated by LOCK_SEP. A "block" lock
+# blocks everyone, its owner included; a "block-weak" lock blocks everyone but
+# its owner; a "delay" lock blocks no one. Only locks on "sleep" count.
+sleep_blockers() {
+    local -r uid="$2"
+    local what who why mode owner
+    while IFS="$LOCK_SEP" read -r what who why mode owner; do
+        [[ ":$what:" == *:sleep:* ]] || continue
+        if [[ "$mode" == block || ("$mode" == block-weak && "$owner" != "$uid") ]]; then
+            printf '%s\n' "$owner$LOCK_SEP$who$LOCK_SEP$why"
+        fi
+    done <<<"$1"
+}
+
+# describe_lock WHO WHY
+# Print a lock for a message, from busctl's C-escaped WHO and WHY:
+# "Jellyfin (Serving media)", or just "Jellyfin" without a reason.
+describe_lock() {
+    local who="$1" why="$2"
+    # printf %b undoes busctl's escapes (\\ \n \303 ...) except \' and \",
+    # which it keeps as they are. busctl escapes every quote, so each \' or \"
+    # in its output is one quote.
+    who="${who//\\\'/\'}" why="${why//\\\'/\'}"
+    who="${who//\\\"/\"}" why="${why//\\\"/\"}"
+    if [[ -n "$why" ]]; then
+        printf '%b (%b)\n' "$who" "$why"
+    else
+        printf '%b\n' "$who"
+    fi
+}
+
+# escape_markup TEXT
+# Print TEXT safe for a notification body, which may be read as markup.
+escape_markup() {
+    local text="$1"
+    # Quoted: in a replacement, a bare & is the matched text (Bash 5.2).
+    text="${text//&/"&amp;"}"
+    text="${text//</"&lt;"}"
+    text="${text//>/"&gt;"}"
+    printf '%s\n' "$text"
+}
+
+# describe_blocked LOCK...
+# Print the body of the "Decaf blocked" notification, from describe_lock's
+# descriptions: "Not suspending: blocked by fwupd (Updating firmware)", and
+# "and N more" after the first one.
+describe_blocked() {
+    local body="Not suspending: blocked by $1"
+    (($# == 1)) || body+=" and $(($# - 1)) more"
+    escape_markup "$body"
 }
 
 # --- system ------------------------------------------------------------------
@@ -323,10 +422,39 @@ sys_wait_until() {
     printf '%s\n' "$now"
 }
 
-# sys_suspend: suspend the system now, ignoring other programs' inhibitor locks.
+# sys_inhibitors
+# Print logind's inhibitor locks, as parse_inhibitors does.
+sys_inhibitors() {
+    local output
+    output="$(busctl --system call org.freedesktop.login1 /org/freedesktop/login1 \
+        org.freedesktop.login1.Manager ListInhibitors)" || {
+        err "could not read the sleep locks from logind; overriding none"
+        return "$EXIT_SYSTEM"
+    }
+    parse_inhibitors "$output" || {
+        err "could not read the sleep locks from logind (unexpected output); overriding none"
+        return "$EXIT_SYSTEM"
+    }
+}
+
+# sys_suspend [LOCK...]
+# Suspend the system now. With no LOCK, logind refuses while any lock blocks
+# it. With LOCKs, the descriptions of the user's own locks that block it,
+# suspend past them: polkit's suspend-ignore-inhibit, which asks for a
+# password unless the polkit rule for the decaf group allows it.
 sys_suspend() {
+    if (($# == 0)); then
+        systemctl suspend || {
+            err "could not suspend"
+            return "$EXIT_SYSTEM"
+        }
+        return 0
+    fi
     systemctl suspend -i || {
-        err "could not suspend"
+        local locks
+        printf -v locks '%s, ' "$@"
+        err "could not suspend past your own sleep locks: ${locks%, }"
+        err "that needs your password, unless you are in the 'decaf' group: see 'man decaf'"
         return "$EXIT_SYSTEM"
     }
 }
@@ -418,14 +546,42 @@ core_wait() {
     if ((noticed - deadline > SKIP_AFTER)); then
         return "$WAIT_SKIPPED"
     fi
-    sys_suspend
+    core_suspend
+}
+
+# core_suspend
+# Suspend now, past the user's own sleep locks but never past those of the
+# system or of other users: if one blocks, notify and return WAIT_BLOCKED. If
+# the locks can't be read, suspend without overriding any.
+core_suspend() {
+    local locks line owner who why
+    local -a own=() others=()
+    if locks="$(sys_inhibitors)"; then
+        while IFS= read -r line; do
+            [[ -n "$line" ]] || continue
+            IFS="$LOCK_SEP" read -r owner who why <<<"$line"
+            if [[ "$owner" == "$UID" ]]; then
+                own+=("$(describe_lock "$who" "$why")")
+            else
+                others+=("$(describe_lock "$who" "$why")")
+            fi
+        done < <(sleep_blockers "$locks" "$UID")
+    fi
+
+    if ((${#others[@]} > 0)); then
+        # The timer matters more than announcing how it ended.
+        sys_notify "$NOTIFY_MS" critical "Decaf blocked" "$(describe_blocked "${others[@]}")" || true
+        return "$WAIT_BLOCKED"
+    fi
+    sys_suspend "${own[@]}"
 }
 
 # core_stopped
 # Run by systemd after the unit stops, for any reason: announces how it ended.
 core_stopped() {
     case "$(sys_stop_reason)" in
-    suspended) return 0 ;;
+    # Blocked: `_wait` notified, as only it knows by what.
+    suspended | blocked) return 0 ;;
     skipped)
         local values duration started now
         values="$(sys_timer_env)" || return
@@ -459,7 +615,7 @@ Usage: decaf on DURATION [--notify]
        decaf status [--notify]
        decaf --help | --version
 
-Suspend the system after a while, even if other programs try to keep it awake.
+Suspend the system after a while, even if your own programs try to keep it awake.
 
 Commands:
   on DURATION  Suspend in DURATION seconds (1 or more).
@@ -552,6 +708,17 @@ cli_parse_notify() {
     printf '%s\n' "$notify"
 }
 
+# cli_wait: run by the timer unit (see core_wait).
+cli_wait() {
+    cli_no_args _wait "$@" || return
+    core_wait && return
+    local -r code=$?
+    if ((code == WAIT_BLOCKED)); then
+        err "not suspending: a sleep lock of the system or of another user blocks it (see 'systemd-inhibit --list')"
+    fi
+    return "$code"
+}
+
 cli_status() {
     local notify
     notify="$(cli_parse_notify "$@")" || return
@@ -575,10 +742,7 @@ main() {
         printf 'decaf %s\n' "$VERSION"
         ;;
     # Internal: run by the timer unit, not by users (see docs/DESIGN.md).
-    _wait)
-        cli_no_args "$command" "$@" || return
-        core_wait
-        ;;
+    _wait) cli_wait "$@" ;;
     _stopped)
         cli_no_args "$command" "$@" || return
         core_stopped

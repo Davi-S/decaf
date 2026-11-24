@@ -18,7 +18,7 @@ DECAF="$PROJECT_ROOT/src/decaf"
 # tests/fakes/fake, so a test can never touch the real system (and never
 # suspends it: `systemctl suspend` is faked too). When decaf
 # starts using a new external command, add it here.
-FAKED_COMMANDS=(systemd-run systemctl date gdbus notify-send sleep)
+FAKED_COMMANDS=(systemd-run systemctl date gdbus busctl notify-send sleep)
 
 common_setup() {
     # Times in notifications are formatted in UTC, so expectations are fixed.

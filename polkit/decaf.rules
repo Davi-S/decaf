@@ -1,0 +1,15 @@
+// decaf: members of the "decaf" group may suspend past sleep locks without a
+// password, so that a timer still suspends when nobody is there to type one.
+// Only from an active local session (not over SSH).
+//
+// Without this, polkit asks for an administrator password. decaf itself only
+// overrides locks held by your own user, but polkit can't tell which program
+// asks: membership lets every program you run suspend past any sleep lock.
+// Join the group with:  sudo usermod -aG decaf USER
+// See 'man decaf' (PERMISSIONS).
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.login1.suspend-ignore-inhibit" &&
+        subject.isInGroup("decaf") && subject.local && subject.active) {
+        return polkit.Result.YES;
+    }
+});

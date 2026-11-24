@@ -9,8 +9,10 @@ This file records decisions. Open items are listed at the end.
 
 ## Goals
 
-- Bash only, minimal runtime dependencies: `bash`, `systemd`, `glib2` (for `gdbus`)
-  and `libnotify`. 2.0 ships without the menu; `rofi` returns with it.
+- Bash only, minimal runtime dependencies: `bash`, `systemd` (also for
+  `busctl`), `glib2` (for `gdbus`), `libnotify` and `polkit` (whose rules
+  directory the package installs into). 2.0 ships without the menu; `rofi`
+  returns with it.
 - Every feature is always on or doesn't exist (no optional dependencies).
 - A strict, scriptable CLI. Users compose their own workflows with shell scripts.
 - Fully testable in CI.
@@ -85,28 +87,69 @@ decaf on 1800
             ├─ "Decaf on" notification
             ├─ waits for the deadline (wall clock, wakes on resume: see expresso)
             ├─ 60 s before, if awake: "Suspending soon" notification
-            └─ at the deadline: suspend, or skip if the system was asleep then
+            └─ at the deadline: suspend, or skip if the system was asleep then,
+               or refuse if a lock of the system or another user blocks it
       unit stops, for any reason → _stopped sends the matching notification
 ```
 
 - **Deadline semantics.** `on N` means "at STARTED + N" on the wall clock; time
   spent suspended counts.
-- **At the deadline, suspend is forced:** `systemctl suspend -i`, ignoring other
-  programs' inhibitor locks (downloads, Steam, expresso). decaf wins over
-  expresso: an explicit "sleep at 23:00" beats "stay awake".
+- **At the deadline, decaf overrides your own sleep locks, and only those**
+  (decision D, revised in 2.3). It reads the locks from logind (`busctl call
+  ... ListInhibitors`) and sorts those that block sleep for this user: mode
+  `block` from anyone, or `block-weak` from another user (logind ignores a
+  `block-weak` lock for its owner).
+  - None: `systemctl suspend`, overriding nothing.
+  - Only your own: `systemctl suspend -i`. Your own locks are downloads,
+    expresso, Steam, a script running `systemd-inhibit`: things you can stop,
+    and an explicit "sleep at 23:00" beats "stay awake". decaf wins over
+    expresso.
+  - Any of the system's or another user's: no suspend. `_wait` sends "Decaf
+    blocked" naming the first such lock, and exits 11. Those locks exist so
+    that nothing breaks (fwupd flashing firmware, an offline system upgrade),
+    or are someone else's work; a timer nobody is watching must not override
+    them.
+  - Locks unreadable (busctl failed, unexpected output): `systemctl suspend`,
+    overriding nothing, so logind enforces every lock. Never override what
+    decaf could not check.
+
+  Between reading the locks and suspending, a new lock of the system could
+  appear and be overridden with `-i`. The window is milliseconds; accepted.
 - **Permission.** A plain suspend from the user unit needs no password
-  (polkit `suspend`: `yes` for the active session; `CanSuspend` answers `yes`).
-  Suspending past a *blocking* lock (expresso, a Steam download), any user's
-  including your own, is polkit's `suspend-ignore-inhibit`: `auth_admin_keep`,
-  so a password prompt appears at the deadline. Kept on purpose (decision D):
-  - no blocking lock: no prompt;
-  - blocking lock, you are there: type your password within 25 s;
-  - blocking lock, nobody answers: after 25 s (the D-Bus call timeout) the
-    prompt closes itself, `systemctl` fails with "Connection timed out", and
-    the timer ends as failed ("Decaf failed", critical). Measured on the real
-    system; it never hangs.
-  A polkit rule removing the prompt was rejected: it would let every user
-  ignore suspend locks without a password.
+  (polkit `suspend`: `yes` for the active session). Suspending past a blocking
+  lock, your own included, is polkit's `suspend-ignore-inhibit`:
+  `auth_admin_keep` by default, so a password prompt appears at the deadline.
+  Nobody answering it was the common failure: you fall asleep with a lock
+  held (in 2.2, a Jellyfin script's `systemd-inhibit`), the prompt closes
+  itself after 25 s (the D-Bus call timeout), `systemctl` fails with
+  "Connection timed out", and the timer ends as failed. decaf then logs which
+  of your locks it tried to override, and how to avoid the prompt.
+
+  So decaf ships a polkit rule (`50-decaf.rules`) granting
+  `suspend-ignore-inhibit` without a password to members of a `decaf` group
+  (created by `sysusers.d`), from an active local session. Opt-in: nobody is in
+  the group until an administrator adds them.
+  - Not for every user: polkit can't tell which program asks, so the rule
+    grants the action to every program a member runs, past any lock. Granting
+    that to every local user (a guest, a child's account) would let them
+    suspend through other users' work and the system's, which today needs an
+    administrator. Group-scoped rules are the usual way packages do this
+    (libvirt's `libvirt` group, for example).
+  - Not a narrower helper: a root helper doing "suspend now, ignoring locks"
+    behind its own polkit action grants exactly the same power, with more
+    moving parts.
+  - Not authorizing at `on` time (as logind's `ScheduleShutdown` does for
+    poweroff): it would ask for a password at every `on`, even from a
+    keybinding, and need a root-owned waiter that `off` could not stop
+    without one.
+  - With the rule, decaf's refusal of the system's and other users' locks is
+    what keeps an unattended timer from suspending through a firmware update.
+
+  The other way to avoid the prompt needs no rule: your own programs take
+  `block-weak` locks (systemd 257+), which logind ignores for their owner.
+  They then stop nothing you run, an idle manager's suspend included, so a
+  program that must keep idle suspend away still needs an `idle` lock or its
+  own check.
 - **Suspended before the deadline, resumed after it:** the timer is skipped, not
   suspended again on resume (the system was asleep at the deadline: the goal was
   met).
@@ -133,6 +176,7 @@ three additions:
   |---|---|---|
   | exit 0: suspend requested | `exited` / `0` | none |
   | exit 10: skipped | `exited` / `10` | Skipped |
+  | exit 11: blocked by a lock of the system or another user | `exited` / `11` | none: `_wait` sent "Decaf blocked", as only it knows the lock |
   | killed (`decaf off`) | `killed` / signal | Turned off |
   | anything else (e.g. the suspend was refused) | | Failed |
 
@@ -140,6 +184,8 @@ three additions:
   failed unit.
 - **Never suspends on an error.** If the clock can't be read while waiting, or
   the timer's values are invalid, `_wait` exits 4 (failed) without suspending.
+  Unreadable sleep locks are not such an error: decaf suspends without
+  overriding any, so logind still enforces every lock.
 - A failed "Decaf on" or "Suspending soon" notification does not cancel the timer.
 - **Action:** suspend only (no hibernate or poweroff).
 - Carried from expresso: install path check, one timer per user, concurrent `on`
@@ -159,6 +205,7 @@ mistaken for a timer that was really set or ended.
 | Suspended | (none: the screen goes off, and a notification waiting on resume would confuse) | | |
 | Skipped | Decaf off | `Skipped: the system was asleep at 23:00` | 2 s |
 | Turned off | Decaf off | `Turned off` | 2 s |
+| Blocked by a lock of the system or another user | Decaf blocked | `Not suspending: blocked by fwupd (Updating firmware)`, then ` and 2 more` if there are others (critical). Sent by `_wait`. | 2 s |
 | Failed | Decaf failed | `Could not suspend. See: journalctl --user -u app-decaf` (critical) | 2 s |
 | `status --notify`, on | Decaf status: on | `Suspending at 23:00 (29m left)`. The time left is in its two largest units, rounded down (`2d 3h`, `1h 5m`, `29m`, `45s`). | 2 s |
 | `status --notify`, off | Decaf status: off | `No timer is on` | 2 s |
@@ -169,14 +216,14 @@ mistaken for a timer that was really set or ended.
 
 As in expresso: one file, `src/decaf`, in layers (cli → core → system → values),
 discipline in place of types, bats with recording fakes (`systemd-run`,
-`systemctl`, `date`, `gdbus`, `notify-send`, `sleep`), and a local
+`systemctl`, `date`, `gdbus`, `busctl`, `notify-send`, `sleep`), and a local
 `tests/integration.sh` against the real systemd.
 
 - `make integration`: automatic checks that never suspend (every timer is
   turned off long before its deadline).
 - `make integration SUSPEND=1` adds three checks that do, each started only
-  after the user presses Enter: decaf suspends at the deadline while another
-  program holds a sleep lock; asleep at the deadline, the timer is skipped;
+  after the user presses Enter: decaf suspends at the deadline while one of
+  your programs holds a sleep lock; asleep at the deadline, the timer is skipped;
   resuming inside the last minute shows the warning. A suspend is detected as
   a gap of more than 5 s between the script's own polls.
 

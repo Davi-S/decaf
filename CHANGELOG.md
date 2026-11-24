@@ -6,6 +6,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A `decaf` group, and a polkit rule that lets its members suspend past sleep
+  locks without a password, from an active local session. Join it
+  (`sudo usermod -aG decaf "$USER"`) so a timer still suspends when one of
+  your programs holds a lock and nobody is there to type the password. polkit
+  can't tell which program asks, so membership applies to every program you
+  run. See "PERMISSIONS" in `man decaf`.
+- "Decaf blocked" notification (critical), naming the lock that stopped the
+  suspend.
+
+### Changed
+
+- At the deadline, decaf overrides only sleep locks held by your own user. A
+  blocking lock of the system or of another user (a firmware update, a system
+  upgrade) is never overridden: the system stays awake, and "Decaf blocked"
+  says why.
+- With no blocking lock, decaf suspends without asking to override any.
+  Your own `block-weak` locks (systemd 257+) need no override, so no password.
+- If the override is refused (no password given in time), the journal names
+  your locks it tried to override and how to avoid the prompt.
+- New dependency: `polkit`.
+
 ## [2.2.1] - 2026-11-23
 
 ### Changed
